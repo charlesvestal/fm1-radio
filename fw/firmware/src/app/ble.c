@@ -3,6 +3,8 @@
  * at boot: a crash restarts the FM-1 without Bluetooth. Part of the unity build (main.c). */
 #include "../../../ble/shim/shim.h"
 
+static volatile uint8_t ble_mute;                 /* test: no audio render while BT runs (main_fm1.c) */
+
 /* ---- the platform the shim asks for */
 uint32_t shim_ms(void) { return fm1_ms; }
 
@@ -213,6 +215,7 @@ static void ble_start(void)
     if (ble_state != BLE_OFF)
         return;
     ble_state = BLE_STARTING;
+    ble_mute = 1;                                 /* test: is it the render's interplay with BT? */
     if (fm1_crash.magic != FM1_CRASH_MAGIC)
         fm1_crash.count = 0;
     blog.magic = BLE_LOG_MAGIC;
@@ -237,6 +240,26 @@ static void ble_poll(void)
     shim_timers();
     shim_run();
     ble_stuck_check();
+    {   /* the reverb's table was overwritten: say what was there (omni.c plate_ok) */
+        extern volatile uint32_t om_fault[5], om_fault_count;
+        static uint32_t seen;
+        if (om_fault_count != seen) {
+            char b[40] = "dl# _ @________ b________";
+            char c[40] = "i________ n________ x___";
+            uint32_t n = om_fault_count;
+            seen = n;
+            b[4] = (char)('0' + (om_fault[0] % 10u));
+            hex8(b + 7, om_fault[4]);
+            hex8(b + 17, om_fault[1]);
+            hex8(c + 1, om_fault[2]);
+            hex8(c + 11, om_fault[3]);
+            c[21] = (char)('0' + n / 100u % 10u);
+            c[22] = (char)('0' + n / 10u % 10u);
+            c[23] = (char)('0' + n % 10u);
+            shim_log(b);
+            shim_log(c);
+        }
+    }
     {   /* every half second: the tasks' deepest stack, kept for after a crash */
         static uint32_t t;
         extern int shim_stack_depth(int task);

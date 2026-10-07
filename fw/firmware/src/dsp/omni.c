@@ -388,6 +388,28 @@ static inline void reverb(float in, float *ol, float *or_)
                    tap(&dl[L_D2R], DS(121)));
 }
 
+/* BLE experiment: the delay-line table is being overwritten while BT runs. Check it every block; on a
+ * change, record what was found (om_fault: line, its b, i, n) and rebuild instead of writing through it */
+volatile uint32_t om_fault[5], om_fault_count;
+static int plate_ok(void)
+{
+    float *p = pl_buf;
+    int k;
+    for (k = 0; k < L_N; k++) {
+        if (dl[k].b != p || dl[k].n != DL_LEN[k] || (uint32_t)dl[k].i >= (uint32_t)DL_LEN[k]) {
+            om_fault[0] = (uint32_t)k;
+            om_fault[1] = (uint32_t)(uintptr_t)dl[k].b;
+            om_fault[2] = (uint32_t)dl[k].i;
+            om_fault[3] = (uint32_t)dl[k].n;
+            om_fault[4] = (uint32_t)(uintptr_t)&dl[k];
+            om_fault_count++;
+            return 0;
+        }
+        p += DL_LEN[k];
+    }
+    return 1;
+}
+
 static void plate_init(void)
 {
     float *p = pl_buf;
@@ -743,6 +765,8 @@ static void render_chunk(int32_t *out, uint32_t n, float gain)
     uint32_t j;
     for (j = 0; j < n; j++)
         mixl[j] = mixr[j] = send[j] = 0.0f;
+    if (!plate_ok())
+        plate_init();
     render_strings(n);
     render_chord(n);
     render_drums(n);

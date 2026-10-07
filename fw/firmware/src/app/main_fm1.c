@@ -35,7 +35,13 @@ static void render_block(int32_t *o)                /* ALNK0: one half, measured
     {
         uint32_t k;
         for (k = 0; k < HALF_FRAMES; k += REND_FRAMES) {
-            om_render(o + 2u * k, REND_FRAMES, master_q12);
+            if (ble_mute) {                         /* BLE experiment: no render while BT runs (a test) */
+                uint32_t z;
+                for (z = 0; z < 2u * REND_FRAMES; z++)
+                    o[2u * k + z] = 0;
+            } else {
+                om_render(o + 2u * k, REND_FRAMES, master_q12);
+            }
 #if FELUCCA_UAC
             uac_tap(o + 2u * k, REND_FRAMES);       /* the USB audio input: the same master output */
 #endif
