@@ -682,11 +682,11 @@ static void draw_main(void)
     }
     if (ui.view == V_RHYTHM) {
         draw_rhythm(44, 62);
-    } else if (ui.view == V_SETUP && ble_status()) {
-        int i;                                   /* BLE experiment: the stack's log, newest at the bottom */
-        cv_rect(0, 40, 240, 70, K_PANEL);
-        for (i = 0; i < 4; i++)
-            cv_text(8, 42 + (3 - i) * 16, &FONT_XS, ble_log_line(i), i ? K_DIM : K_TEXT);
+    } else if (ui.view == V_SETUP && ble_log_total()) {
+        int i;                                   /* BLE experiment: the stack's log (or the last run's), newest at the bottom */
+        cv_rect(0, 38, 240, 104, K_PANEL);
+        for (i = 0; i < 7; i++)
+            cv_text(6, 39 + (6 - i) * 14, &FONT_XS, ble_log_line(i), i ? K_DIM : K_TEXT);
     } else {
         draw_strings(44, 54);
     }

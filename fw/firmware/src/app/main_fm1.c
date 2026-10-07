@@ -299,6 +299,7 @@ static void fm1_main(void)
         panel_setup();                              /* OCT- + OCT+ held at power-on */
     fm1_delay_ms(400);
     ui_init();
+    ble_boot_note();
 
     for (;;) {
         fm1_wdt_feed();

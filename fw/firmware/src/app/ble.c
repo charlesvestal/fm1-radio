@@ -19,7 +19,20 @@ void shim_irq_restore(uint32_t f)
         fm1_irq_on();
 }
 int shim_in_irq(void) { return 0; }
-void shim_idle(void) {}
+/* every task waits: run what is due (a timer may be what they wait for) and keep the watchdog fed,
+ * whichever context we are in (btstack_init waits in the main loop's) */
+static void ble_stuck_check(void);
+void shim_idle(void)
+{
+    static uint8_t in;
+    fm1_wdt_feed();
+    if (!in) {
+        in = 1;
+        shim_timers();
+        ble_stuck_check();
+        in = 0;
+    }
+}
 void shim_reboot(void) { fm1_reboot(); }
 
 /* the radio's interrupts sit above the audio render (ALNK0, 3) and the input timer (4): JieLi
@@ -36,19 +49,51 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
         ble_irqs[ble_nirq++] = (uint8_t)index;
 }
 
-/* a short log for the screen */
-#define BLE_LOG_N 6
-static char ble_log[BLE_LOG_N][40];
-static uint32_t ble_log_w, ble_log_count;
+/* a short log for the screen, kept through a reset (.noinit): after a crash or a watchdog reset the
+ * Setup page shows what the last run said */
+#define BLE_LOG_N 8
+#define BLE_LOG_MAGIC 0x424C4531u                 /* "BLE1" */
+static struct {
+    uint32_t magic, w, count, crash_seen, running;
+    char line[BLE_LOG_N][40];
+} blog __attribute__((section(".noinit")));
+#define ble_log_w blog.w
+#define ble_log_count blog.count
 void shim_log(const char *s)
 {
-    char *d = ble_log[ble_log_w % BLE_LOG_N];
+    char *d = blog.line[blog.w % BLE_LOG_N];
     uint32_t i;
+    if (blog.magic != BLE_LOG_MAGIC)
+        return;
     for (i = 0; i < 39u && s[i]; i++)
         d[i] = s[i] >= 32 && s[i] < 127 ? s[i] : ' ';
     d[i] = 0;
-    ble_log_w++;
-    ble_log_count++;
+    blog.w++;
+    blog.count++;
+}
+static void hex8(char *b, uint32_t v)
+{
+    int i;
+    for (i = 0; i < 8; i++)
+        b[i] = "0123456789ABCDEF"[(v >> (28 - 4 * i)) & 15u];
+}
+/* at boot: what ended the last BLE run */
+static void ble_boot_note(void)
+{
+    char b[40] = "crash pc ________ v__ r ________";
+    if (blog.magic != BLE_LOG_MAGIC || blog.w > 100000u)
+        return;
+    if (fm1_crash.magic == FM1_CRASH_MAGIC && fm1_crash.count != blog.crash_seen) {
+        blog.crash_seen = fm1_crash.count;
+        hex8(b + 9, fm1_crash.pc);
+        b[19] = (char)('0' + fm1_crash.vec / 10 % 10);
+        b[20] = (char)('0' + fm1_crash.vec % 10);
+        hex8(b + 24, fm1_crash.rets);
+        shim_log(b);
+    } else if (blog.running) {
+        shim_log("reset, no crash: watchdog?");
+    }
+    blog.running = 0;
 }
 
 int shim_store_load(void *dst, uint32_t max) { return plat_store_load(OBJ_BLE, dst, max); }
@@ -109,12 +154,31 @@ const uint8_t *bt_get_mac_addr(void)
     return mac;
 }
 
+static uint32_t ble_t0;
+extern void shim_os_dump(void);
+static void ble_stuck_check(void)                 /* still starting after 3 s: say what each task waits for */
+{
+    static uint32_t said;
+    if (ble_state == BLE_STARTING && fm1_ms - ble_t0 > 3000u && said != ble_t0) {
+        said = ble_t0;
+        shim_log("still starting after 3 s:");
+        shim_os_dump();
+    }
+}
+
 static void ble_start(void)
 {
     uint8_t addr[6];
     if (ble_state != BLE_OFF)
         return;
     ble_state = BLE_STARTING;
+    if (fm1_crash.magic != FM1_CRASH_MAGIC)
+        fm1_crash.count = 0;
+    blog.magic = BLE_LOG_MAGIC;
+    blog.w = blog.count = 0;
+    blog.crash_seen = fm1_crash.count;
+    blog.running = 1;
+    ble_t0 = fm1_ms;
     shim_log("BT: starting");
     shim_os_init();
     lmp_set_sniff_disable();
@@ -130,6 +194,7 @@ static void ble_poll(void)
         return;
     shim_timers();
     shim_run();
+    ble_stuck_check();
 }
 
 static int ble_status(void) { return ble_state; }
@@ -137,6 +202,6 @@ static const char *ble_log_line(int back)
 {
     if ((uint32_t)back >= ble_log_count || back >= BLE_LOG_N)
         return "";
-    return ble_log[(ble_log_w - 1u - (uint32_t)back) % BLE_LOG_N];
+    return blog.line[(blog.w - 1u - (uint32_t)back) % BLE_LOG_N];
 }
-static uint32_t ble_log_total(void) { return ble_log_count; }
+static uint32_t ble_log_total(void) { return blog.magic == BLE_LOG_MAGIC ? blog.count : 0u; }

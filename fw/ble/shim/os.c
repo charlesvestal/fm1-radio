@@ -200,6 +200,32 @@ int task_kill(const char *name)
     return 0;
 }
 
+/* for the screen: each task and what it waits for */
+void shim_os_dump(void)
+{
+    static const char *const W[] = {"run", "taskq", "sem", "mutex", "time"};
+    int i;
+    for (i = 0; i < NTASK; i++)
+        if (tasks[i].used) {
+            char b[40];
+            int n = 0;
+            const char *s = tasks[i].name ? tasks[i].name : "?";
+            while (*s && n < 14)
+                b[n++] = *s++;
+            b[n++] = ' ';
+            s = W[tasks[i].wait < 5 ? tasks[i].wait : 0];
+            while (*s && n < 22)
+                b[n++] = *s++;
+            b[n++] = ' ';
+            b[n++] = 'q';
+            b[n++] = (char)('0' + (q_used(&tasks[i]) > 9 ? 9 : q_used(&tasks[i])));
+            if (&tasks[i] == shim_cur)
+                b[n++] = '*';
+            b[n] = 0;
+            shim_log(b);
+        }
+}
+
 const char *os_current_task(void) { return shim_cur->name; }
 const char *os_current_task_rom(void) { return shim_cur->name; }
 
