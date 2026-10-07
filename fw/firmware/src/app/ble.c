@@ -56,6 +56,7 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
 #define BLE_LOG_MAGIC 0x424C4531u                 /* "BLE1" */
 static struct {
     uint32_t magic, w, count, crash_seen, running, repeat;
+    uint8_t depth[4];                             /* each task's deepest stack, 256-byte units (the last seen) */
     char line[BLE_LOG_N][40];
 } blog __attribute__((section(".noinit")));
 #define ble_log_w blog.w
@@ -114,6 +115,22 @@ static void ble_boot_note(void)
         b[20] = (char)('0' + fm1_crash.vec % 10);
         hex8(b + 24, fm1_crash.rets);
         shim_log(b);
+        {   /* which guard: EMU_MSG (bit 3 stack limit), DBG_MSG (4,5,16..21 bus; 12 PC; 13 write limit) */
+            char c[40] = "emu ________ dbg ________ sp ________";
+            hex8(c + 4, fm1_crash.emu);
+            hex8(c + 17, fm1_crash.dbg);
+            hex8(c + 29, fm1_crash.sp);
+            shim_log(c);
+        }
+        {
+            char d[40] = "stacks (x256B) __ __ __";
+            int k;
+            for (k = 0; k < 3; k++) {
+                d[15 + 3 * k] = (char)('0' + blog.depth[k] / 10 % 10);
+                d[16 + 3 * k] = (char)('0' + blog.depth[k] % 10);
+            }
+            shim_log(d);
+        }
     } else if (blog.running) {
         shim_log("reset, no crash: watchdog?");
     }
@@ -220,6 +237,16 @@ static void ble_poll(void)
     shim_timers();
     shim_run();
     ble_stuck_check();
+    {   /* every half second: the tasks' deepest stack, kept for after a crash */
+        static uint32_t t;
+        extern int shim_stack_depth(int task);
+        if (fm1_ms - t > 500u) {
+            int k;
+            t = fm1_ms;
+            for (k = 0; k < 3; k++)
+                blog.depth[k] = (uint8_t)shim_stack_depth(k + 1);
+        }
+    }
 }
 
 static int ble_status(void) { return ble_state; }

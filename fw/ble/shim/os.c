@@ -203,6 +203,17 @@ int task_kill(const char *name)
     return 0;
 }
 
+/* task's deepest stack so far, in 256-byte units (the "STAK" fill left untouched) */
+int shim_stack_depth(int i)
+{
+    int u = 0;
+    if (i < 1 || i >= NTASK || !tasks[i].used)
+        return 0;
+    while (u < STACK_WORDS && stacks[i - 1][u] == 0x5354414Bu)
+        u++;
+    return (STACK_WORDS - u) * 4 / 256;
+}
+
 /* for the screen: each task and what it waits for */
 void shim_os_dump(void)
 {
