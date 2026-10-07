@@ -34,6 +34,7 @@ void shim_idle(void)
     }
 }
 void shim_reboot(void) { fm1_reboot(); }
+void shim_wdt(void) { fm1_wdt_feed(); }
 
 /* the radio's interrupts sit above the audio render (ALNK0, 3) and the input timer (4): JieLi
  * asks for 0..2; BLE's own timing cannot wait out a render */
@@ -51,10 +52,10 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
 
 /* a short log for the screen, kept through a reset (.noinit): after a crash or a watchdog reset the
  * Setup page shows what the last run said */
-#define BLE_LOG_N 8
+#define BLE_LOG_N 12
 #define BLE_LOG_MAGIC 0x424C4531u                 /* "BLE1" */
 static struct {
-    uint32_t magic, w, count, crash_seen, running;
+    uint32_t magic, w, count, crash_seen, running, repeat;
     char line[BLE_LOG_N][40];
 } blog __attribute__((section(".noinit")));
 #define ble_log_w blog.w
@@ -65,6 +66,29 @@ void shim_log(const char *s)
     uint32_t i;
     if (blog.magic != BLE_LOG_MAGIC)
         return;
+    if (blog.w) {                                 /* the same start as the last line: fold it, "(xN)" */
+        char *p = blog.line[(blog.w - 1u) % BLE_LOG_N];
+        for (i = 0; i < 5u && s[i] && s[i] == p[i]; i++)
+            ;
+        if (i == 5u || (!s[i] && !p[i])) {
+            uint32_t n = ++blog.repeat + 1u, k = 0;
+            char num[12];
+            for (i = 0; i < 26u && s[i]; i++)
+                p[i] = s[i] >= 32 && s[i] < 127 ? s[i] : ' ';
+            p[i++] = ' ';
+            p[i++] = 'x';
+            do {
+                num[k++] = (char)('0' + n % 10u);
+                n /= 10u;
+            } while (n && k < 10u);
+            while (k)
+                p[i++] = num[--k];
+            p[i] = 0;
+            blog.count++;
+            return;
+        }
+    }
+    blog.repeat = 0;
     for (i = 0; i < 39u && s[i]; i++)
         d[i] = s[i] >= 32 && s[i] < 127 ? s[i] : ' ';
     d[i] = 0;
@@ -181,6 +205,7 @@ static void ble_start(void)
     ble_t0 = fm1_ms;
     shim_log("BT: starting");
     shim_os_init();
+    fm1_guard_stack_floor(shim_stacks_lo());      /* the tasks' stacks are in the pool */
     lmp_set_sniff_disable();
     lib_make_ble_address(addr, (uint8_t *)bt_get_mac_addr());
     le_controller_set_mac(addr);

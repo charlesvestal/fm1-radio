@@ -96,6 +96,18 @@ static void fm1_guard_lock_top(void)
     fm1__dbg_lock();
 }
 
+/* BLE experiment: let sp go down to lo (the BT tasks' stacks in the pool), up to the system
+ * stack's top as before */
+static void fm1_guard_stack_floor(uint32_t lo)
+{
+    fm1__dbg_unlock();
+    FM1_EMU_CON &= ~(1u << 3);
+    FM1_EMU_SSP_L = lo;
+    FM1_EMU_USP_L = lo;
+    FM1_EMU_CON |= 1u << 3;
+    fm1__dbg_lock();
+}
+
 /* reopen the reserved top of RAM (mailbox write before a UBOOT reset) */
 static void fm1_guard_unlock_top(void)
 {

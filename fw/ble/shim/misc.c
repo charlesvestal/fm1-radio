@@ -173,6 +173,7 @@ int printf(const char *f, ...)
     va_start(ap, f);
     fmt(b, sizeof b, f, ap);
     va_end(ap);
+    shim_wdt();
     if (b[0])
         shim_log(b);
     return 0;
@@ -354,12 +355,14 @@ u32 clk_get(const char *name) { (void)name; return 24000000u; }   /* the radio a
 
 static void busy_us(u32 us)
 {
-    uint32_t t = shim_ms() * 1000u, n;
+    uint32_t n;
     volatile uint32_t k;
-    (void)t;
-    for (n = 0; n < us; n++)                       /* ~1 us at the AC79's clock; refined on the device */
+    for (n = 0; n < us; n++) {                     /* ~1 us at the AC79's clock; refined on the device */
         for (k = 0; k < 40u; k++)
             ;
+        if (!(n & 1023u))
+            shim_wdt();                            /* the radio's calibration loops on delays for seconds */
+    }
 }
 void delay(u32 n) { busy_us(n); }
 void delay_us(u32 us) { busy_us(us); }

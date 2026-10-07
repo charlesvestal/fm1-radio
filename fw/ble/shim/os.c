@@ -13,7 +13,7 @@
 
 #define NTASK 4                       /* main + btctrler, btstack, btencry */
 #define QLEN 512                      /* ints per task queue */
-#define STACK_WORDS 1024              /* 4 KiB per task */
+#define STACK_WORDS 2048              /* 8 KiB per task: an interrupt (the audio render) nests on top */
 
 enum { W_NONE, W_TASKQ, W_SEM, W_MUTEX, W_TIME };
 typedef struct {
@@ -29,7 +29,8 @@ typedef struct {
 } task_t;
 
 static task_t tasks[NTASK];
-static uint32_t stacks[NTASK - 1][STACK_WORDS] __attribute__((aligned(8), section(".shim_stack")));
+static uint32_t stacks[NTASK - 1][STACK_WORDS] __attribute__((aligned(8), section(".pool")));
+uint32_t shim_stacks_lo(void) { return (uint32_t)(uintptr_t)&stacks[0][0]; }
 task_t *shim_cur = &tasks[0];
 static uint32_t ticks_ms(void) { return shim_ms(); }
 
@@ -183,6 +184,8 @@ int task_create(void (*fn)(void *), void *p, const char *name)
             t->name = name;
             t->fn = fn;
             t->arg = p;
+            for (k = 0; k < STACK_WORDS - 13; k++)
+                stacks[i - 1][k] = 0x5354414Bu;          /* "STAK": how deep it went (shim_os_dump) */
             for (k = 1; k <= 13; k++)
                 top[-k] = (uint32_t)(uintptr_t)shim_task_entry;
             t->sp = (uint32_t)(uintptr_t)(top - 13);
@@ -219,6 +222,16 @@ void shim_os_dump(void)
             b[n++] = ' ';
             b[n++] = 'q';
             b[n++] = (char)('0' + (q_used(&tasks[i]) > 9 ? 9 : q_used(&tasks[i])));
+            if (i) {                                    /* stack used, of 8 KiB, in 256-byte steps */
+                int u = 0;
+                while (u < STACK_WORDS && stacks[i - 1][u] == 0x5354414Bu)
+                    u++;
+                u = (STACK_WORDS - u) * 4 / 256;
+                b[n++] = ' ';
+                b[n++] = 's';
+                b[n++] = (char)('0' + u / 10 % 10);
+                b[n++] = (char)('0' + u % 10);
+            }
             if (&tasks[i] == shim_cur)
                 b[n++] = '*';
             b[n] = 0;

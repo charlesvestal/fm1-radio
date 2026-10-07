@@ -38,6 +38,7 @@ int shim_in_irq(void);
 void shim_idle(void);                 /* the main loop has nothing to run: return soon */
 void shim_request_irq(int index, int prio, void (*handler)(void));
 void shim_reboot(void);
+void shim_wdt(void);                  /* feed the watchdog: long hardware loops (the radio's calibration) */
 void shim_log(const char *s);         /* a line for the screen's log */
 int shim_store_load(void *dst, uint32_t max);   /* syscfg's flash object */
 int shim_store_save(const void *src, uint32_t len);
@@ -45,6 +46,7 @@ void shim_bt_event(int from, const void *event, int len);
 
 /* the shim, to the firmware */
 void shim_os_init(void);
+uint32_t shim_stacks_lo(void);        /* the lowest address a task's sp may reach */
 void shim_run(void);                  /* the main loop's slice: run every BT task that can go */
 void shim_timers(void);               /* due sys_timers, from the main loop */
 int task_create(void (*fn)(void *), void *p, const char *name);
