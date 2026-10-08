@@ -28,6 +28,7 @@
 #define FM1_DBG_MSG (*(volatile uint32_t *)0x1EEE244u)
 #define FM1_DBG_MSG_CLR (*(volatile uint32_t *)0x1EEE248u)
 #define FM1_DBG_EN (*(volatile uint32_t *)0x1EEE340u)
+#define FM1_IPMASK (*(volatile uint32_t *)0x1EEF1A8u)   /* BLE experiment: priorities >= this fire under cli (SDK: init.c) */
 
 enum { FM1_IRQ_EXCEPTION = 1, FM1_IRQ_ALNK0 = 11, FM1_IRQ_SPI1 = 16, FM1_IRQ_UART1 = 20,
        FM1_IRQ_SARADC = 24, FM1_IRQ_SPI2 = 37, FM1_IRQ_TIMER5 = 63, FM1_IRQ_SOFT0 = 120 };
@@ -42,7 +43,23 @@ typedef struct {
     uint32_t magic, count, vec, pc, rets, emu, dbg, sp, psr, icfg, uptime_ms;
     uint32_t etm[4];
     uint32_t early;                          /* consecutive crashes < 3 s after boot */
+    /* BLE experiment: the interrupt controller at the fault: usp/ssp from the frame, ICFG 0..7 (IRQ 0..63,
+     * a nibble each: enable bit 0, priority bits 1..3), IPND 0, 1, 3 (IRQ 0..63, 96..127), the vectors
+     * of ALNK0, TIMER5, BLE_EVENT (45), BLE_RX (29) */
+    uint32_t usp, ssp, ie[8], ipnd[3], vtab[4];
+    uint32_t clk[4];                        /* SYS_DIV, CLK_CON0, CLK_CON1, SFC_CON at the fault */
 } fm1_crash_t;
+static inline uint32_t fm1_uptime_ms(void) { return *(volatile uint32_t *)0x10804u / 24000u; }   /* TIMER4, as fm1_fault_c */
+/* BLE experiment: accumulate every pending interrupt bit seen (IPND 0..7, IRQ 0..255) */
+static inline void fm1_ipnd_or(uint32_t o[8]) { uint32_t i; for (i = 0; i < 8u; i++) o[i] |= FM1_IPND(i); }
+/* BLE experiment: the clock tree and the flash controller, for the crash note */
+static inline void fm1_clk_snapshot(uint32_t o[4])
+{
+    o[0] = *(volatile uint32_t *)0x10008u;
+    o[1] = *(volatile uint32_t *)0x1000Cu;
+    o[2] = *(volatile uint32_t *)0x10010u;
+    o[3] = *(volatile uint32_t *)0x40200u;
+}
 /* Not static: .noinit holds whatever the last run (or power-on) left, and a
  * file-local object would let the compiler assume its zero initial value and
  * fold the magic check away. */
@@ -81,6 +98,11 @@ static void fm1_irq_attach(uint32_t n, void (*h)(void), uint32_t prio)   /* IRQs
     FM1_ICFG(n) = (FM1_ICFG(n) & ~(0xFu << sh)) | ((((prio & 7u) << 1) | 1u) << sh);
 }
 static void fm1_irq_mask(uint32_t n) { FM1_ICFG(n) &= ~(1u << ((n & 7u) * 4u)); }
+static void fm1_irq_unmask(uint32_t n) { FM1_ICFG(n) |= 1u << ((n & 7u) * 4u); }   /* BLE experiment */
+/* BLE experiment: the eight soft interrupts (120..127) are raised and cleared through ILAT */
+static inline void fm1_irq_soft_set(uint32_t k) { FM1_ILAT_SET = 1u << k; }
+static inline void fm1_irq_soft_clr(uint32_t k) { FM1_ILAT_CLR = 1u << k; }
+static inline uint32_t fm1_ipmask(void) { return FM1_IPMASK; }
 
 static void fm1_irq_enable_all(void)
 {
@@ -112,6 +134,18 @@ void fm1_fault_c(uint32_t *f)
     fm1_crash.uptime_ms = *(volatile uint32_t *)0x10804u / 24000u;   /* TIMER4 since boot */
     for (i = 0; i < 4u; i++)
         fm1_crash.etm[i] = FM1_ETM_PC(i);
+    fm1_crash.usp = f[22];
+    fm1_crash.ssp = f[23];
+    for (i = 0; i < 8u; i++)
+        fm1_crash.ie[i] = *(volatile uint32_t *)(0x1EEF100u + 4u * i);
+    fm1_crash.ipnd[0] = FM1_IPND(0);
+    fm1_crash.ipnd[1] = FM1_IPND(1);
+    fm1_crash.ipnd[2] = FM1_IPND(3);
+    fm1_crash.vtab[0] = FM1_VEC[11];
+    fm1_crash.vtab[1] = FM1_VEC[63];
+    fm1_crash.vtab[2] = FM1_VEC[45];
+    fm1_crash.vtab[3] = FM1_VEC[29];
+    fm1_clk_snapshot(fm1_crash.clk);
     fm1_crash.early = fm1_crash.uptime_ms < 3000u ? early + 1u : 0u;
     fm1_fault(&fm1_crash);
     for (;;)

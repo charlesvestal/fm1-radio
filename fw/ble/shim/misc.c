@@ -195,7 +195,7 @@ void log_print(int level, const char *tag, const char *f, ...)
     if (b[0])
         shim_log(b);
 }
-void config_asser(void) {}
+const int config_asser = 1;                       /* the SDK's lib_system_config.c: assertions report */
 void cpu_assert_debug(void) { shim_log("BT assert"); }
 
 /* ---------------------------------------------------------------- interrupts --- */
@@ -338,7 +338,10 @@ u32 crc_get_32bit(const void *src, u32 len)
 }
 
 /* ---------------------------------------------------------------- power, clocks --- */
-void *low_power_get(void *priv, const void *ops) { (void)priv; (void)ops; return 0; }
+/* the BLE controller keeps this handle (hw->power_ctrl) and asserts it is not null; it is only ever
+ * handed back to the low_power_* calls below */
+static uint32_t low_power_handle[16];
+void *low_power_get(void *priv, const void *ops) { (void)priv; (void)ops; return low_power_handle; }
 void low_power_put(void *priv) { (void)priv; }
 void low_power_request(char *name) { (void)name; }
 void low_power_exit_request(void) {}
@@ -364,9 +367,12 @@ static void busy_us(u32 us)
             shim_wdt();                            /* the radio's calibration loops on delays for seconds */
     }
 }
-void delay(u32 n) { busy_us(n); }
-void delay_us(u32 us) { busy_us(us); }
-void hw_udelay(u32 us) { busy_us(us); }
+/* diagnostics: who last asked for a delay (ble.c shows it after a crash) */
+extern volatile uint32_t shim_delay_from, shim_delay_n;
+#define NOTE_CALLER() (shim_delay_from = (uint32_t)(uintptr_t)__builtin_return_address(0), shim_delay_n++)
+void delay(u32 n) { NOTE_CALLER(); busy_us(n); }
+void delay_us(u32 us) { NOTE_CALLER(); busy_us(us); }
+void hw_udelay(u32 us) { NOTE_CALLER(); busy_us(us); }
 void adc_add_sample_ch(u32 ch) { (void)ch; }
 u32 adc_get_value(u32 ch) { (void)ch; return 0; }
 void aes_hw_lock(void) {}

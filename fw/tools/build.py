@@ -168,7 +168,7 @@ def build_loader():
 
 # ---- BLE experiment: JieLi's BT libraries (closed) and a few SDK sources, on the shim (ble/shim)
 BLE_LIBS = ["btctrler.a", "btstack.a", "crypto_toolbox_Osize.a", "lib_ccm_aes.a", "wl_rf_common.a"]
-BLE_SDK_SRC = ["apps/common/ble/le_trans_data.c", "apps/common/config/bt_profile_config.c",
+BLE_SDK_SRC = ["apps/common/config/bt_profile_config.c",
                "apps/common/config/log_config/lib_btctrler_config.c",
                "apps/common/config/log_config/lib_btstack_config.c"]
 BLE_INC = ["include_lib", "include_lib/driver", "include_lib/driver/device", "include_lib/driver/cpu/wl82",
@@ -207,8 +207,11 @@ def ble_units():
         (dst / ".copied").write_text("")
     inc = [f"-I{dst.relative_to(SRC) / d}" for d in BLE_INC] + ["-Ible/shim"]
     (OUT / "ble" / "o").mkdir(parents=True, exist_ok=True)
-    units, objs = [("cc", "-c", SRC / "ble" / "shim" / "ctx.S", "-o", OUT / "ble" / "o" / "ctx.o")], [OUT / "ble" / "o" / "ctx.o"]
-    for f in [*(SRC / "ble" / "shim").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
+    units, objs = [], []
+    for a in ("ctx", "trace"):
+        units.append(("cc", "-c", SRC / "ble" / "shim" / f"{a}.S", "-o", OUT / "ble" / "o" / f"{a}.o"))
+        objs.append(OUT / "ble" / "o" / f"{a}.o")
+    for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "midi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
         o = OUT / "ble" / "o" / (f.stem + ".o")
         units.append(("cc", *BLE_CF, *inc, "-c", f, "-o", o))
         objs.append(o)
