@@ -74,3 +74,12 @@ Differences from the plan above: the TRS jack is MIDI in only on the FM-1, so TR
 sent to; at BT start only TIMER5 is masked (no ALNK0 in a controller); BLE MIDI in has its own queue
 (main loop) instead of sharing `midi_in_q` with the TIMER5 producers; output to BLE is dropped while
 no central listens.
+
+## The crash's likely root cause (2026-10-08, fm1-ctl)
+
+Ctl crashed at its first BT start like fm1-ble used to: 728 ms in, inside `adc_pp_tune` / `rd_adc_peak`,
+returning to 0x030339BC instead of 0x020339BC (one high bit wrong, as in every crash in 03-05; JieLi's ISRs
+never ran, nothing pending). JieLi's demo configs say why: `CONFIG_RF_TRIM_CODE_AT_RAM` puts the RF trim code
+in RAM "so that flash access during the RF trim's ~500 ms of high current does not make the flash fail".
+fm1-ble's app.ld put `*.rf.text.cache.L2.rf_trim` in XIP; the masking in 05 only made it less likely. fm1-ctl
+now runs that section, and the shim's delays (TIMER4, watchdog fed inline), from RAM. Pending a device run.
