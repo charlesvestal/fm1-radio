@@ -64,3 +64,13 @@ JieLi's libraries never go into git (`.gitignore`); the build copies them from `
 3. Out: BLE, USB MIDI and TRS at once. In: BLE -> USB and TRS; USB -> BLE and TRS.
 4. A BLE page: on/off, state, connected, counters. Bluetooth off at boot until it is trusted.
 5. Tests: the host simulator (with BLE stubs), the web build.
+
+## Status (2026-10-08)
+
+Started as `fm1-parent/fm1-ctl` ("Ctl", identity FM-1_6, a local git repo with no remote). Scope 1-5 done
+as far as the desk goes: the firmware builds (218 KB) and its checks pass; host tests, three simulator
+scenarios (notes, thru routing, Bluetooth, persistence) and the web build pass. Not yet run on the FM-1.
+Differences from the plan above: the TRS jack is MIDI in only on the FM-1, so TRS is forwarded, never
+sent to; at BT start only TIMER5 is masked (no ALNK0 in a controller); BLE MIDI in has its own queue
+(main loop) instead of sharing `midi_in_q` with the TIMER5 producers; output to BLE is dropped while
+no central listens.
