@@ -82,4 +82,5 @@ returning to 0x030339BC instead of 0x020339BC (one high bit wrong, as in every c
 never ran, nothing pending). JieLi's demo configs say why: `CONFIG_RF_TRIM_CODE_AT_RAM` puts the RF trim code
 in RAM "so that flash access during the RF trim's ~500 ms of high current does not make the flash fail".
 fm1-ble's app.ld put `*.rf.text.cache.L2.rf_trim` in XIP; the masking in 05 only made it less likely. fm1-ctl
-now runs that section, and the shim's delays (TIMER4, watchdog fed inline), from RAM. Pending a device run.
+now runs that section, and the shim's delays (TIMER4, watchdog fed inline), from RAM. Confirmed on the device:
+BT starts without crashing; a Mac (bleak) connects; BLE -> USB and USB -> BLE pass MIDI.
