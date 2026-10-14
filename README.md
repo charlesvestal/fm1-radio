@@ -181,7 +181,74 @@ chops and mute work on top of them. The chops run at about 120 BPM: a stream has
 - 2.4 GHz WiFi only, and plain-HTTP MP3 streams only.
 - The core voltage is raised to 1.50 V at start (the SDK uses 1.45 V at this clock). At 1.40 V, flash
   reads failed under WiFi load and the FM-1 crashed.
-- RAM is nearly full. The Bluetooth code from fm1-ble is still linked but unused.
+- RAM is full (see below). The Bluetooth code from fm1-ble is still linked but unused.
+
+## Where the space goes
+
+The FM-1 has no external RAM, so WiFi has to fit in the chip's own memory beside the radio. The
+figures are from the build of October 2026, rounded, measured from the linked image's symbols. FoMni,
+a synth with no radio, is about 158 KB in all for comparison.
+
+### Flash: the 581 KB app slot
+
+The image is 545 KB, which leaves about 36 KB free.
+
+| Part | Size |
+|---|---|
+| JieLi's WiFi driver (`wl_wifi_sta_sfc`) | 142 KB |
+| WPA supplicant | 77 KB |
+| lwIP (TCP/IP, built from the SDK's source) | 51 KB |
+| JieLi's RF layer, crypto and the shim's WiFi glue | 26 KB |
+| **WiFi in all** | **about 296 KB** |
+| JieLi's BLE controller and stack, BLE MIDI | 86 KB |
+| The radio, minimp3, UI, fonts and platform | about 90 KB |
+
+### RAM: 128 KB of static data
+
+`.data` and `.bss` use all but about 200 bytes of the chip's 128 KB of RAM.
+
+| Part | Size |
+|---|---|
+| WiFi driver: its adapter (32 KB), transmit (20 KB) and receive (4 KB) buffers, and the rest | 61 KB |
+| RF layer | 7 KB |
+| lwIP | 6 KB |
+| The shim's task table: 14 tasks, each with a 2 KB message queue | 30 KB |
+| **WiFi in all** | **about 104 KB** |
+| BLE: controller, stack and MIDI | 9 KB |
+| The platform: audio buffers, storage, USB | about 20 KB |
+
+Everything else goes in the pool.
+
+### The pool: 304 KB of RAM for big buffers
+
+The pool has about 11 KB free.
+
+| Part | Size |
+|---|---|
+| Task stacks: 13 of 8 KB, for the WiFi, network and timer tasks | 104 KB |
+| The heap | 136 KB |
+| lwIP's packet buffers | 28 KB |
+| The screen's drawing buffer (240 × 48 pixels: rows are drawn 48 lines at a time) | 23 KB |
+| The debug log | 10 KB |
+
+While a station plays, about 125 KB of the 136 KB heap is in use:
+
+- the radio takes about 64 KB:
+  - the stream buffer (20 KB);
+  - the decoded audio (14 KB);
+  - the effects' history (12 KB);
+  - the decoder and its working space (17 KB);
+- WiFi, WPA and lwIP take the other 60 KB.
+
+### What this means
+
+- **WiFi is the bulk of the firmware:** about 300 KB of flash and, with its task stacks and heap, about
+  three quarters of the RAM. Getting there took the SDK's `_sfc` WiFi libraries (smaller buffers
+  than the default ones), a narrower screen buffer and the 136 KB heap.
+- **BLE costs 86 KB of flash and 9 KB of RAM.** While it stays off, it takes no stack or heap. Taking
+  it out would leave room for more effects or a bigger stream buffer.
+- **New features need room found first.** RAM is full, so new state goes in the pool or the heap.
+  Flash has room for small features.
 
 ## History
 

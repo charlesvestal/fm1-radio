@@ -1028,6 +1028,14 @@ static void fm1_main(void)
                 down &= ~(1u << B_HOME);
             }
         }
+        {   /* the white keys, held on Home: the punch-in FX (a wire test's 0x47 holds one too) */
+            uint32_t keys = ui_page == PG_HOME ? plat_keys() : 0u, h = 0;
+            int w;
+            for (w = 0; w < 16; w++)
+                if (keys >> WHITE_KEY[w] & 1u)
+                    h |= 1u << w;
+            fx_held = h | fx_wire;
+        }
         if (ui_page == PG_HOME) {
             if (down & (1u << B_PLAY))
                 radio_toggle();
@@ -1039,16 +1047,6 @@ static void fm1_main(void)
             sel_turn(1, plat_enc(EN_K2));
             sel_turn(2, plat_enc(EN_K3));
             sel_turn(3, plat_enc(EN_K4) + turn);
-        }
-        {   /* the white keys, held on Home: the punch-in FX (a wire test's 0x47 holds one too) */
-            uint32_t keys = ui_page == PG_HOME ? plat_keys() : 0u, h = 0;
-            int w;
-            for (w = 0; w < 16; w++)
-                if (keys >> WHITE_KEY[w] & 1u)
-                    h |= 1u << w;
-            fx_held = h | fx_wire;
-        }
-        if (ui_page == PG_HOME) {
         } else if (ui_page == PG_BROWSE) {
             int n = (int)br_count();
             if (turn) {
