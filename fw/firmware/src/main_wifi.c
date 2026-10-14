@@ -20,6 +20,10 @@
 #define SHIM_WATCH_FRAME 32u             /* shim_delay_us's own frame (its prologue, from the disassembly) */
 #define CV_MAX (240u * 48u)           /* rows of at most 48: the rest of the pool goes to the WiFi heap */
 #include "libc.c"
+/* screenshots over the wire (0x60, tools/screenshot.py): while shot_on, every fill and blit is sent too */
+static void shot_tap(int fill, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *px, uint16_t c);
+static uint8_t shot_on;
+#define LCD_TAP(f, x, y, w, h, px, c) do { if (shot_on) shot_tap(f, x, y, w, h, px, c); } while (0)
 #include "lcd.c"
 #include "gfx.c"
 
@@ -390,6 +394,38 @@ static void wire_send(uint8_t code, int idx, const char *s, int nibbles)
     m[n++] = 0xF7;
     ota_wire_send(m, n);
 }
+
+/* a fill: F0 7D 57 63 x:2 y:2 w:2 h:2 c:3 F7; a blit, a message a row: F0 7D 57 61 x:2 y:2 w:2 then the
+ * row's bytes as the panel takes them (RGB565, high byte first), 7 bytes in 8 (a byte of high bits first) */
+static void shot_tap(int fill, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *px, uint16_t c)
+{
+    uint8_t m[4 + 6 + 560 + 1];
+    uint32_t r;
+    for (r = 0; r < (fill ? 1u : h); r++) {
+        uint32_t n = 0, yy = y + r;
+        m[n++] = 0xF0; m[n++] = 0x7D; m[n++] = 0x57; m[n++] = fill ? 0x63 : 0x61;
+        m[n++] = (uint8_t)(x & 0x7F); m[n++] = (uint8_t)(x >> 7);
+        m[n++] = (uint8_t)(yy & 0x7F); m[n++] = (uint8_t)(yy >> 7);
+        m[n++] = (uint8_t)(w & 0x7F); m[n++] = (uint8_t)(w >> 7);
+        if (fill) {
+            m[n++] = (uint8_t)(h & 0x7F); m[n++] = (uint8_t)(h >> 7);
+            m[n++] = (uint8_t)(c & 0x7F); m[n++] = (uint8_t)(c >> 7 & 0x7F); m[n++] = (uint8_t)(c >> 14);
+        } else {
+            const uint8_t *b = (const uint8_t *)(px + r * w);
+            uint32_t len = w * 2u, i, k;
+            for (i = 0; i < len; i += 7u) {
+                uint32_t hi = n++;
+                m[hi] = 0;
+                for (k = 0; k < 7u && i + k < len; k++) {
+                    m[hi] |= (uint8_t)((b[i + k] >> 7) << k);
+                    m[n++] = b[i + k] & 0x7F;
+                }
+            }
+        }
+        m[n++] = 0xF7;
+        ota_wire_send(m, n);
+    }
+}
 static void wire_line(const char *s) { wire_send(0x10, -1, s, 0); }
 static void wire_end(void) { wire_send(0x11, -1, 0, 0); }
 
@@ -486,7 +522,7 @@ static void wire_status(void)
 
 static const uint8_t WHITE_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
 static uint32_t fx_wire;
-static volatile uint8_t url_restart;
+static volatile uint8_t url_restart, shot_req;
 #include "app/rg.c"
 
 static void wire_service(void)
@@ -982,6 +1018,7 @@ static void fm1_main(void)
         }
         case 0x40: radio_play(wire_arg); break;
         case 0x45: radio_toggle(); break;
+        case 0x60: shot_req = (uint8_t)(wire_arg | 0x80u); break;   /* a screenshot: 0 this page, 1..4 another */
         case 0x47: fx_wire = wire_arg && wire_arg <= FX_N ? 1u << (wire_arg - 1u) : 0u; break;   /* hold FX n */         /* as PLAY on Home */
         case 0x46:                                /* as a knob: level 0..3 (K1..K4), a signed step */
             sel_turn(wire_arg & 3u, (int8_t)(wire_arg2 & 0x40u ? wire_arg2 | 0x80u : wire_arg2));
@@ -1171,6 +1208,24 @@ static void fm1_main(void)
             radio_stop();                         /* the network went: so does the stream */
         radio_poll();
 
+        if (shot_req) {                           /* a screenshot: the page drawn whole, sent as it draws */
+            static const uint8_t PAGE[5] = {0, PG_HOME, PG_BROWSE, PG_WIFI, PG_HELP};
+            uint8_t want = shot_req & 0x7Fu, was = ui_page;
+            shot_req = 0;
+            if (want && want < 5u) {
+                if (PAGE[want] == PG_BROWSE && sel_valid())
+                    br_open();
+                ui_page = PAGE[want];
+            }
+            shot_on = 1;
+            ui_dirty = 1;
+            ui_draw();
+            lcd_sync();
+            shot_on = 0;
+            wire_send(0x62, -1, "end", 0);
+            if (want && ui_page != was)
+                ui_page_set(was);
+        }
         if (fm1_ms - last_frame >= 100u) {
             last_frame = fm1_ms;
             ui_draw();

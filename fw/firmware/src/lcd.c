@@ -78,6 +78,9 @@ static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
         w = 240u - x;
     if (y + h > 240u)
         h = 240u - y;
+#ifdef LCD_TAP
+    LCD_TAP(1, x, y, w, h, 0, c);           /* a screenshot over the wire (main_wifi.c) */
+#endif
     lcd_sync();
     k = 240u / w * w;                       /* whole rows per transfer (narrow fills: one DMA) */
     for (i = 0; i < k; i++)
@@ -94,6 +97,9 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 {
     if (!w || !h)
         return;
+#ifdef LCD_TAP
+    LCD_TAP(0, x, y, w, h, px, 0);
+#endif
     lcd_window(x, y, x + w - 1u, y + h - 1u);
     lcd_data(px, w * h * 2u);
 }

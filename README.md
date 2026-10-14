@@ -6,6 +6,8 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
+![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
+
 ## Licensing status
 
 **Source only, no binaries.** The source is free software under GPL-3.0-only, the licence of
@@ -127,6 +129,8 @@ The knobs work as a dial: turn them, and the radio tunes once you stop. The scre
 its city and country, and whether it is playing or buffering. A station that drops out is reconnected
 by itself.
 
+![The controls, shown while HOME is held](docs/img/help.png)
+
 In the browser, turn **SELECT** to move, press **SEL** to open a place or to play a station, and
 press **HOME** to go up a level.
 
@@ -156,6 +160,8 @@ stop it. Hold several to mix them. The screen shows what is held, and a held key
 | 15 | Mute |
 | 16 | Lo-fi |
 
+![Home with stutter 1/4 held](docs/img/fx.png)
+
 The stutters, tape stop, reverse and half speed play back the last quarter second, in mono. Only one
 of them plays at a time: with two held, the lower key wins. The filters, crushers, ring modulator,
 chops and mute work on top of them. The chops run at about 120 BPM: a stream has no tempo to follow.
@@ -175,6 +181,9 @@ chops and mute work on top of them. The chops run at about 120 BPM: a stream has
 | `turn K D` | As turning knob K+1 (0 to 3) by D. |
 | `fx N` | As holding white key N (1 to 16); `fx 0` lets go. |
 | `url URL` | Play the stream at URL, `http://` or `https://`, until the next tune. |
+
+`fw/tools/screenshot.py OUT.png [home|browse|wifi|help]` saves the screen as a PNG: the FM-1 redraws
+the page and sends it over USB as it draws. The pictures here were taken that way.
 | `rgload FILE`, `rginfo` | Send the station table; show the one the FM-1 holds. |
 | `reboot` | Restart. |
 
