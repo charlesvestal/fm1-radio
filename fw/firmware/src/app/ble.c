@@ -309,6 +309,34 @@ static void ble_boot_note(void)
 int shim_store_load(void *dst, uint32_t max) { return plat_store_load(OBJ_BLE, dst, max); }
 int shim_store_save(const void *src, uint32_t len) { return plat_store_save(OBJ_BLE, src, len); }
 
+/* the BT address: the one kept, or one made from the chip's unique data (the SDK's own fallback is
+ * a random one, kept). The WiFi build makes its MAC from it (wifi.c), so it stays with BLE out. */
+#define CFG_BT_MAC_ADDR 1                         /* include_lib/utils/syscfg/syscfg_id.h */
+extern int syscfg_read(uint16_t id, void *buf, uint16_t len);
+extern int syscfg_write(uint16_t id, void *buf, uint16_t len);
+const uint8_t *bt_get_mac_addr(void)
+{
+    static uint8_t mac[6];
+    static const uint8_t none[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    uint32_t i, h = 2166136261u;
+    if (syscfg_read(CFG_BT_MAC_ADDR, mac, 6) == 6 && memcmp(mac, none, 6))
+        return mac;
+    h ^= fm1_ticks();
+    for (i = 0; i < 6u; i++) {
+        h = (h ^ (h >> 13)) * 16777619u + fm1_ticks();
+        mac[i] = (uint8_t)(h >> 8);
+    }
+    mac[0] = (uint8_t)((mac[0] & 0xFC) | 0xC0);   /* a static random address */
+    syscfg_write(CFG_BT_MAC_ADDR, mac, 6);
+    return mac;
+}
+
+#ifdef SHIM_NO_BLE   /* the radio: the shim for JieLi's WiFi only, none of the BLE stack below */
+static uint8_t irqs_masked;
+static void ble_stuck_check(void) {}
+void shim_bt_event(int from, const void *event, int len) { (void)from; (void)event; (void)len; }
+static int ble_status(void) { return 0; }
+#else
 enum { BLE_OFF, BLE_STARTING, BLE_READY, BLE_FAILED };
 static volatile uint8_t ble_state;
 
@@ -385,26 +413,6 @@ void shim_bt_event(int from, const void *event, int len)
     }
 }
 
-/* the BT address: the one kept, or one made from the chip's unique data (the SDK's own fallback is
- * a random one, kept) */
-#define CFG_BT_MAC_ADDR 1                         /* include_lib/utils/syscfg/syscfg_id.h */
-const uint8_t *bt_get_mac_addr(void)
-{
-    static uint8_t mac[6];
-    static const uint8_t none[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    uint32_t i, h = 2166136261u;
-    if (syscfg_read(CFG_BT_MAC_ADDR, mac, 6) == 6 && memcmp(mac, none, 6))
-        return mac;
-    h ^= fm1_ticks();
-    for (i = 0; i < 6u; i++) {
-        h = (h ^ (h >> 13)) * 16777619u + fm1_ticks();
-        mac[i] = (uint8_t)(h >> 8);
-    }
-    mac[0] = (uint8_t)((mac[0] & 0xFC) | 0xC0);   /* a static random address */
-    syscfg_write(CFG_BT_MAC_ADDR, mac, 6);
-    return mac;
-}
-
 static uint32_t ble_t0;
 static uint8_t irqs_masked;
 static void ble_irqs_back(const char *why)
@@ -429,6 +437,8 @@ static void ble_stuck_check(void)                 /* still starting after 3 s: s
         shim_os_dump();
     }
 }
+
+#endif   /* SHIM_NO_BLE */
 
 /* a fresh log (kept through resets), for a start that is not BLE's */
 static void shim_log_begin(const char *first)
@@ -462,6 +472,7 @@ static void shim_up(void)
     task_create(sys_timer_task, 0, "sys_timer");
 }
 
+#ifndef SHIM_NO_BLE
 static void ble_start(void)
 {
     uint8_t addr[6];
@@ -565,6 +576,7 @@ static void ble_poll(void)
 }
 
 static int ble_status(void) { return ble_state; }
+#endif   /* SHIM_NO_BLE */
 static const char *ble_log_line(int back)
 {
     if ((uint32_t)back >= ble_log_count || back >= BLE_LOG_N)

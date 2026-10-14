@@ -56,7 +56,8 @@ static uint8_t radio_st;
 static uint8_t radio_mode;
 static uint32_t local_pos;
 static uint32_t radio_dropped;
-static uint8_t *net_buf, *lin_buf;
+static uint8_t *net_buf;
+static uint8_t lin_buf[LIN_MAX];                  /* in RAM (BLE's room): the heap's goes to https */
 static int16_t *pcm_buf;                          /* PCM_FRAMES x 2 */
 static mp3dec_t *mp3;
 static volatile uint32_t pcm_r, pcm_w;            /* frames: the ISR reads, the main loop writes */
@@ -78,14 +79,13 @@ static int radio_alloc(void)
     if (net_buf)
         return 0;
     net_buf = malloc(NET_RING);
-    lin_buf = malloc(LIN_MAX);
     pcm_buf = malloc(PCM_FRAMES * 4u);
     mp3 = malloc(sizeof *mp3);
     pcm_tmp = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof *pcm_tmp);
-    if (!net_buf || !lin_buf || !pcm_buf || !mp3 || !pcm_tmp) {
-        free(net_buf); free(lin_buf); free(pcm_buf); free(mp3); free(pcm_tmp);
+    if (!net_buf || !pcm_buf || !mp3 || !pcm_tmp) {
+        free(net_buf); free(pcm_buf); free(mp3); free(pcm_tmp);
         pcm_tmp = 0;
-        net_buf = lin_buf = 0;
+        net_buf = 0;
         pcm_buf = 0;
         mp3 = 0;
         return -1;

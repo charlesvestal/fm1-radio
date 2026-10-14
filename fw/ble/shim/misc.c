@@ -50,6 +50,7 @@ static uint32_t heap[HEAP_BYTES / 4u] __attribute__((section(".pool")));
 typedef struct blk { uint32_t size; struct blk *next; } blk_t;   /* size in bytes, header included */
 static blk_t *free_list;
 uint32_t shim_heap_used, shim_heap_peak;        /* bytes, headers included: now, and the most ever */
+const uint32_t shim_heap_size = HEAP_BYTES;
 static int heap_ready;
 
 static void heap_init(void)

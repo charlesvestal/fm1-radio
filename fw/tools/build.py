@@ -5,8 +5,8 @@
 
   tools/build.py [--release X.Y[-suffix]]
 
-Outputs in build/: omni.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
-omni.fwsc (package). See BUILDING.md for the toolchain and the SDK.
+Outputs in build/: NAME.bin (app), loader/ota.bin (update loader, Felucca's, unchanged),
+NAME.fwsc (package): radio with --wifi, omni without. See the README for the toolchain and the SDK.
 
 The JieLi toolchain is Linux x86-64 only. JIELI_TOOLCHAIN points at it; on
 macOS (or with JIELI_DOCKER=1) each tool runs in a linux/amd64 container.
@@ -53,6 +53,7 @@ SDK_SHA256 = {
 
 PRODUCT = "FM-1_899"                # package identity; release builds are FM-1_8XXYYZZ (see main)
 VERSION = None                      # FELUCCA_VERSION for release builds (default: firmware/src/ui.c)
+NAME = "omni"                       # the outputs' name: "radio" with --wifi
 WIFI_BUILD = False                  # --wifi: compile main_wifi.c (WiFi PoC) instead of main.c
 
 
@@ -197,6 +198,7 @@ def build_loader():
 
 # ---- BLE experiment: JieLi's BT libraries (closed) and a few SDK sources, on the shim (ble/shim)
 BLE_LIBS = ["btctrler.a", "btstack.a", "crypto_toolbox_Osize.a", "lib_ccm_aes.a", "wl_rf_common.a"]
+BT_ONLY_LIBS = ["btctrler.a", "btstack.a"]        # the radio (--wifi) leaves the BLE stack out
 # the SDK's no-SDRAM builds (demo_audio) link the _sfc variants: smaller buffers, code from flash
 WIFI_LIBS = ["wl_wifi_sta_sfc.a", "wpasupplicant.a", "hsm.a"]
 # lwIP from the SDK's sources (its _sfc project's files and flags), with ble/lwip/lwipopts_sfc.h: a wider TCP window
@@ -282,8 +284,8 @@ def ble_units():
             units.append(("cc", *BLE_CF, *BSSL_CF, *inc, f"-I{(bssl / 'inc').relative_to(SRC)}",
                           f"-I{(bssl / 'src').relative_to(SRC)}", "-c", f, "-o", o))
             objs.append(o)
-    for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "midi").glob("*.c"),
-              *(SRC / "ble" / "wifi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
+    ble_only = [] if WIFI_BUILD else [*(SRC / "ble" / "midi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]
+    for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "wifi").glob("*.c"), *ble_only]:
         o = OUT / "ble" / "o" / (f.stem + ".o")
         if f.parent.name == "wifi" and WIFI_BUILD:   # the radio's sockets: lwIP's options as it is built
             units.append(("cc", *BLE_CF, *LWIP_CF, *BSSL_CF, *lwip_inc, "-Ifirmware/third_party/bearssl/inc",
@@ -292,7 +294,8 @@ def ble_units():
             continue
         units.append(("cc", *BLE_CF, *(["-DSHIM_HEAP_KB=144u", *(["-DSHIM_WIFI_RX_MODERATE"] if os.environ.get("WIFI_RX") == "moderate" else []), *(["-DSHIM_GLOBAL_IRQ"] if os.environ.get("SHIM_IRQ") == "global" else [])] if WIFI_BUILD else []), *inc, "-c", f, "-o", o))
         objs.append(o)
-    libs = ["--start-group", *[dst / "lib" / f for f in BLE_LIBS + WIFI_LIBS], dst / "lib" / "libcompiler_rt.a", "--end-group"]
+    linked = [f for f in BLE_LIBS if f not in BT_ONLY_LIBS] + WIFI_LIBS if WIFI_BUILD else BLE_LIBS
+    libs = ["--start-group", *[dst / "lib" / f for f in linked], dst / "lib" / "libcompiler_rt.a", "--end-group"]
     return units, objs, libs
 
 
@@ -323,7 +326,7 @@ def build_app():
     b_units, b_objs, b_libs = ble_units()
     units += b_units
     tc_all(*units)
-    elf = OUT / "omni.elf"
+    elf = OUT / f"{NAME}.elf"
     # unreferenced functions (each in its own section: -ffunction-sections) are dropped: the DSP keeps
     # mono reference paths for the host tests that the firmware no longer calls
     tc("pi32v2/bin/ld", "--plugin", "/opt/jieli/pi32v2/bin/LLVMgold.so", "--plugin-opt=mcpu=r3",
@@ -337,7 +340,7 @@ def build_app():
                                ("common/bin/objdump", "-t", elf),
                                ("common/bin/objdump", "-d", elf),
                                ("common/bin/objdump", "-d", "-j", ".ram_text", elf))
-    (OUT / "omni.dis").write_text(dis)
+    (OUT / f"{NAME}.dis").write_text(dis)
 
     def symv(name):
         return int(re.search(r"^([0-9a-f]+) .*\s" + name + r"$", syms, re.M).group(1), 16)
@@ -354,7 +357,7 @@ def build_app():
             img += b"\xff" * (load - APP_XIP - len(img))
             img += blob
     img += b"\xff" * (-len(img) % 4)
-    (OUT / "omni.bin").write_bytes(img)
+    (OUT / f"{NAME}.bin").write_bytes(img)
     return bytes(img), syms, dis, rt
 
 
@@ -446,7 +449,7 @@ def mmio_check():
 
 
 def main():
-    global PRODUCT, VERSION, WIFI_BUILD
+    global PRODUCT, VERSION, WIFI_BUILD, NAME
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_8XXYYZZ, version string X.Y[.Z]")
     ap.add_argument("--wifi", action="store_true", help="WiFi PoC build: compile main_wifi.c (no synth)")
@@ -454,8 +457,9 @@ def main():
     a = ap.parse_args()
     if a.wifi:
         WIFI_BUILD = True
+        NAME = "radio"
         PRODUCT = "FM-1_000"                     # digits only: the installers parse it
-    name = "omni.fwsc"
+    name = f"{NAME}.fwsc"
     if a.release:
         # identity FM-1_8 + major, minor, patch as two digits each (0.1 -> FM-1_8000100): FM-1 is the
         # model the update tools match on; the number is ours (X0X is FM-1_9...). Digits only after the
@@ -465,7 +469,7 @@ def main():
             raise SystemExit(f"--release {a.release}: use X.Y[.Z][-suffix], up to two digits each")
         PRODUCT = "FM-1_8%02d%02d%02d" % (int(m[1]), int(m[2]), int(m[3] or 0))
         VERSION = a.release.upper() if "BETA" in a.release.upper() else a.release.upper() + " BETA"
-        name = f"omni-{a.release}.fwsc"
+        name = f"{NAME}-{a.release}.fwsc"
     fm1pkg_make.SDK = a.sdk
     for rel, sha in SDK_SHA256.items():          # fail early without the SDK
         if hashlib.sha256(fm1pkg_make.sdk_file(rel)).hexdigest() != sha:
@@ -489,7 +493,7 @@ def main():
         raise SystemExit("build: checks failed")
     pkg = fm1pkg_make.ufw(fm1pkg_make.flash_image(img, fm1pkg_make.KEY), ota, PRODUCT)
     (OUT / name).write_bytes(pkg)
-    print(f"app      {OUT / 'omni.bin'}  {len(img)} B")
+    print(f"app      {OUT / (NAME + '.bin')}  {len(img)} B")
     print(f"loader   {LDR / 'ota.bin'}  {len(ota)} B")
     print(f"package  {OUT / name}  {len(pkg)} B, identity {PRODUCT}")
     return 0

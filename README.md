@@ -10,7 +10,7 @@ It is a proof of concept: it works, and the rough edges are listed at the end.
 
 **Source only, no binaries.** The source is free software under GPL-3.0-only, the licence of
 [Felucca](https://github.com/hugelton/Felucca), whose platform layer it is built on. A built firmware
-links JieLi's closed WiFi and Bluetooth libraries from the AC79 SDK. The GPL does not allow
+links JieLi's closed WiFi libraries from the AC79 SDK. The GPL does not allow
 distributing that combination without an additional permission under its section 7 from Felucca's
 copyright holder, Hügelton Instruments. That permission has been asked for and not yet given. Until
 then:
@@ -51,10 +51,10 @@ For where each part of the code comes from, see [`fw/LICENSING.md`](fw/LICENSING
 cd fw
 AC79_SDK=~/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=~/.jieli/toolchain \
     /opt/homebrew/bin/python3 tools/build.py --wifi
-python3 tools/fm1_install.py build/omni.fwsc --yes      # the FM-1 plugged in over USB
+python3 tools/fm1_install.py build/radio.fwsc --yes      # the FM-1 plugged in over USB
 ```
 
-The build makes `fw/build/omni.fwsc` and checks the image and RAM sizes. It runs about a
+The build makes `fw/build/radio.fwsc` and checks the image and RAM sizes. It runs about a
 minute; it keeps one toolchain container running, which stops after an hour idle.
 
 To go back to M-VAVE's firmware, use the web installer on
@@ -73,7 +73,8 @@ python3 tools/wifi_ctl.py rgload build/rg/stations.bin # about 30 seconds
 ```
 
 `rg_sync.py` asks Radio Garden for each city's stations, follows each to its real stream and keeps
-the ones the FM-1 can play: plain `http://` MP3 streams (no HTTPS, AAC or HLS). It keeps up to six
+the ones the FM-1 can play: plain `http://` MP3 streams (no AAC or HLS). HTTPS streams it keeps
+only where there's room (see HTTPS and certificates). It keeps up to six
 stations a city, about 3,600 in all. Everything it fetches is cached in `build/rg/`, so a second
 run takes a second. `--refresh` asks again.
 
@@ -173,15 +174,42 @@ chops and mute work on top of them. The chops run at about 120 BPM: a stream has
 | `radio` | As PLAY: play or stop. |
 | `turn K D` | As turning knob K+1 (0 to 3) by D. |
 | `fx N` | As holding white key N (1 to 16); `fx 0` lets go. |
+| `url URL` | Play the stream at URL, `http://` or `https://`, until the next tune. |
 | `rgload FILE`, `rginfo` | Send the station table; show the one the FM-1 holds. |
 | `reboot` | Restart. |
 
+## HTTPS and certificates
+
+The FM-1 plays `https://` MP3 streams as well as plain `http://` ones, with
+[BearSSL](https://www.bearssl.org)'s TLS client:
+
+- TLS 1.2;
+- ECDHE key exchange on P-256;
+- AES-GCM;
+- RSA or ECDSA server keys.
+
+That covers what streaming servers offer.
+
+**It does not check certificates.** The FM-1 has no root certificates and no clock, so it uses the
+server's key as sent and doesn't verify who signed it. The connection is encrypted, but someone on
+your network who wanted to could pose as the station and send you other audio. For a radio this is a
+small risk. Checking certificates is possible now that BLE's flash is free: BearSSL's checker, a
+set of the root certificates radio servers use, and the date from network time would take about
+35–45 KB.
+
+The station table doesn't hold HTTPS stations yet: at six stations a city, the table's flash is
+already full, and HTTPS stations will only be added on top of the plain ones. You can play an HTTPS
+stream by hand with `wifi_ctl.py url` (see below).
+
 ## Known limits
 
-- 2.4 GHz WiFi only, and plain-HTTP MP3 streams only.
+- 2.4 GHz WiFi only. MP3 streams only: no AAC or HLS.
+- Server certificates aren't checked (see above).
 - The core voltage is raised to 1.50 V at start (the SDK uses 1.45 V at this clock). At 1.40 V, flash
   reads failed under WiFi load and the FM-1 crashed.
-- RAM is full (see below). The Bluetooth code from fm1-ble is still linked but unused.
+- The MP3 decoder has crashed twice, both times around a change of station, and the FM-1 restarted.
+  It hasn't happened on demand since; the crash record over USB (`dump`) keeps the next one.
+- RAM is full (see below).
 
 ## Where the space goes
 
@@ -191,76 +219,81 @@ a synth with no radio, is about 158 KB in all for comparison.
 
 ### Flash: the 581 KB app slot
 
-The image is 545 KB, which leaves about 36 KB free.
+The image is 476 KB, which leaves about 105 KB free.
 
 | Part | Size |
 |---|---|
-| JieLi's WiFi driver (`wl_wifi_sta_sfc`) | 142 KB |
+| JieLi's WiFi driver (`wl_wifi_sta_sfc`) | 146 KB |
 | WPA supplicant | 77 KB |
 | lwIP (TCP/IP, built from the SDK's source) | 51 KB |
-| JieLi's RF layer, crypto and the shim's WiFi glue | 26 KB |
-| **WiFi in all** | **about 296 KB** |
-| JieLi's BLE controller and stack, BLE MIDI | 86 KB |
-| The radio, minimp3, UI, fonts and platform | about 90 KB |
+| JieLi's RF layer and crypto, the shim and its WiFi glue | 25 KB |
+| **WiFi in all** | **about 299 KB** |
+| HTTPS: BearSSL's code (22 KB), its tables and the TLS glue | 36 KB |
+| The radio, minimp3, UI, fonts and platform | about 99 KB |
 
 ### RAM: 128 KB of static data
 
-`.data` and `.bss` use all but about 200 bytes of the chip's 128 KB of RAM.
+`.data` and `.bss` use 125 KB of the chip's 128 KB of RAM, leaving about 3 KB.
 
 | Part | Size |
 |---|---|
 | WiFi driver: its adapter (32 KB), transmit (20 KB) and receive (4 KB) buffers, and the rest | 61 KB |
-| RF layer | 7 KB |
+| RF layer | 3 KB |
 | lwIP | 6 KB |
 | The shim's task table: 14 tasks, each with a 2 KB message queue | 30 KB |
-| **WiFi in all** | **about 104 KB** |
-| BLE: controller, stack and MIDI | 9 KB |
-| The platform and the radio: audio buffers, storage, USB, screen state | about 15 KB |
-
-Everything else goes in the pool.
+| **WiFi in all** | **about 100 KB** |
+| The decoder's window for a stream that wraps round its buffer | 6 KB |
+| The platform and the radio: audio buffers, storage, USB, screen state | about 22 KB |
 
 ### The pool: 304 KB of RAM for big buffers
 
-The pool has about 11 KB free.
+The pool has about 3 KB free.
 
 | Part | Size |
 |---|---|
 | Task stacks: 13 of 8 KB, for the WiFi, network and timer tasks | 104 KB |
-| The heap | 136 KB |
+| The heap | 144 KB |
 | lwIP's packet buffers | 28 KB |
 | The screen's drawing buffer (240 × 48 pixels: rows are drawn 48 lines at a time) | 23 KB |
-| The debug log | 10 KB |
 
-While a station plays, about 125 KB of the 136 KB heap is in use:
+The stream task uses 6 KB of its 8 KB stack during a TLS handshake, and about 2 KB otherwise.
 
-- the radio takes about 64 KB:
-  - the stream buffer (20 KB);
-  - the decoded audio (14 KB);
-  - the effects' history (12 KB);
-  - the decoder and its working space (17 KB);
-- WiFi, WPA and lwIP take the other 60 KB.
+A separate 15 KB area keeps the crash record and the debug log through a restart. It also holds the
+TLS client's state (4.5 KB).
+
+While a station plays, the radio takes about 57 KB of the heap:
+
+- the stream buffer (20 KB);
+- the decoded audio (14 KB);
+- the effects' history (12 KB);
+- the decoder (11 KB).
+
+WiFi, WPA and lwIP take about 60 KB. An HTTPS stream adds its 16.7 KB record buffer. The heap peaks at
+about 138 of 144 KB on HTTPS, leaving about 9 KB of slack.
 
 ### What this means
 
 - **WiFi is the bulk of the firmware:** about 300 KB of flash and, with its task stacks and heap, about
   three quarters of the RAM. Getting there took the SDK's `_sfc` WiFi libraries (smaller buffers
-  than the default ones), a narrower screen buffer and the 136 KB heap.
-- **BLE costs 86 KB of flash and 9 KB of RAM.** While it stays off, it takes no stack or heap. Taking
-  it out would leave room for more effects or a bigger stream buffer.
-- **New features need room found first.** RAM is full, so new state goes in the pool or the heap.
-  Flash has room for small features.
+  than the default ones), a narrower screen buffer and a heap that takes nearly all of the pool.
+- **Flash has room:** about 105 KB, since BLE came out. That's room for certificate checking, more
+  effects or other features.
+- **RAM has little:** new buffers need room found first. The candidates are fewer task stacks (most
+  tasks use under 4 KB of their 8) and a smaller stream buffer on HTTPS streams.
 
 ## History
 
 The repository began as fm1-ble, which got JieLi's BLE stack running on a small cooperative OS shim
 inside a Felucca firmware, as BLE MIDI. The notes in `notes/` are from that work. The radio reuses the
-shim for JieLi's WiFi libraries.
+shim for JieLi's WiFi libraries. The BLE stack itself was taken out of the radio's build to make room;
+`fw/firmware/src/app/ble.c` keeps it behind `SHIM_NO_BLE`, and fm1-ble has the working BLE MIDI.
 
 ## Credits
 
 - [Felucca](https://github.com/hugelton/Felucca) by Hügelton Instruments: the platform layer
   (GPL-3.0-only).
 - [minimp3](https://github.com/lieff/minimp3) by lieff: the MP3 decoder (CC0).
+- [BearSSL](https://www.bearssl.org) by Thomas Pornin: the TLS client (MIT).
 - The JieLi AC79 SDK (Apache-2.0): the WiFi libraries, lwIP and the radio's tuning constants.
 - [Radio Garden](https://radio.garden): the stations. Radio Garden isn't affiliated with this
   project.

@@ -208,6 +208,14 @@ char *strstr(const char *h, const char *nd)
             return (char *)h;
     return 0;
 }
+char *strdup(const char *s)                       /* BT's libraries brought one; the WiFi side uses it too */
+{
+    size_t n = strlen(s) + 1u;
+    char *d = malloc(n);
+    if (d)
+        memcpy(d, s, n);
+    return d;
+}
 void *realloc(void *p, size_t n)
 {
     void *q;

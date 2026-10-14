@@ -1,5 +1,6 @@
-/* WiFi + BLE PoC for the FM-1: a stripped-down firmware with no synth, just the platform layer
- * (boot, LCD, USB, panel) plus BLE MIDI and WiFi STA. Shows status on the screen.
+/* fm1-radio: an internet radio for the FM-1, on the platform layer (boot, LCD, USB, panel), JieLi's WiFi
+ * libraries on the cooperative shim (ble/shim, which started as fm1-ble's for the BT libraries), lwIP,
+ * BearSSL and minimp3.
  * Build: tools/build.py --wifi */
 #include <stdint.h>
 #include "fm1_time.h"
@@ -187,7 +188,8 @@ static volatile uint8_t stall_flag;
 static uint32_t stall_pnd[8], stall_ms;
 static const char *stall_task;
 
-/* ---- BLE (the existing shim + MIDI) ---- */
+/* ---- the shim's platform side (app/ble.c, fm1-ble's, without its BLE stack) ---- */
+#define SHIM_NO_BLE 1
 #define OBJ_BLE 2
 #define BLE_LOG_N 64                      /* 2.5 KB: NOINIT's room goes to the https client's state */
 #define OBJ_WIFI OBJ_PROJ                 /* no project in this firmware: its object holds the networks */
@@ -358,7 +360,7 @@ static void wdt_feed_alive(void)
 
 /* ---- the wire: SysEx F0 7D 57 <cmd> [data] F7 (tools/wifi_ctl.py, web/wifi.html). Text bytes travel as
  * two nibbles each (an SSID may hold any byte).
- *   1 WiFi on, 5 WiFi off, 2 BLE on, 3 scan, 4 scan into the log, 0x10 dump (lines F0 7D 57 10 <text> F7,
+ *   1 WiFi on, 5 WiFi off, 3 scan, 4 scan into the log, 0x10 dump (lines F0 7D 57 10 <text> F7,
  *   then F0 7D 57 11 F7), 0x12 forget the crash, 0x20 add <ssid 0 pass>, 0x21 list (F0 7D 57 21 <i>
  *   <ssid> F7 each, then 11), 0x22 delete <i>, 0x23 join saved <i>, 0x24 status (F0 7D 57 24 <text> F7),
  *   0x7F reboot. Actions run in the main loop; the dump, the list and the status are answered at once,
@@ -396,14 +398,15 @@ static void wire_dump(void)
 {
     char b[72];
     int i;
-    snprintf(b, sizeof b, "up %u ms  wifi %s  ble %d  isr %u  tmr %d", fm1_ms, wifi_status_str(), ble_status(),
+    snprintf(b, sizeof b, "up %u ms  wifi %s  isr %u  tmr %d", fm1_ms, wifi_status_str(),
              shim_isr_trace.n, shim_timers_used());
     wire_line(b);
     radio_ui_dump();
     {
         extern uint32_t shim_heap_used, shim_heap_peak;
+        extern const uint32_t shim_heap_size;
         snprintf(b, sizeof b, "heap %u used, %u peak, of %u  isr-blocks %u", shim_heap_used, shim_heap_peak,
-                 136u * 1024u, shim_isr_blocks);
+                 shim_heap_size, shim_isr_blocks);
         wire_line(b);
     }
     snprintf(b, sizeof b, "radio %s  net %d  buf %u/%u  pcm %u  fr %u  %uHz %ukbps", radio_status_str(),
@@ -483,6 +486,7 @@ static void wire_status(void)
 
 static const uint8_t WHITE_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
 static uint32_t fx_wire;
+static volatile uint8_t url_restart;
 #include "app/rg.c"
 
 static void wire_service(void)
@@ -506,6 +510,7 @@ static void wire_service(void)
             radio_url_buf[k++] = (char)((p[i] & 15u) << 4 | (p[i + 1] & 15u));
         radio_url_buf[k] = 0;
         radio_url = k ? radio_url_buf : RADIO_URL;
+        url_restart = 1;                          /* the main loop restarts the stream on it */
     }
     if (cmd == 0x20) {                            /* ssid 0 pass, as nibbles */
         char *d = wire_ssid;
@@ -625,7 +630,6 @@ static void ui_status(void)
 {
     char ssid[33], v[24];
     uint16_t wc = wifi_st == WS_CONNECTED ? K_TEAL : wifi_st == WS_FAILED ? K_CORAL : K_TEXT;
-    int b = ble_status();
     ui_title(0, "WiFi", "");
     ui_row(1, 48, 26, "WiFi", wifi_status_str(), K_DIM, wc, K_BG);
     ssid_show(ssid, wifi_ssid[0] ? wifi_ssid : "-", sizeof ssid);
@@ -638,8 +642,6 @@ static void ui_status(void)
     if (wifi_st == WS_CONNECTED)
         snprintf(v, sizeof v, "%d dBm", wifi_rssi);
     ui_row(4, 126, 26, "Signal", v, K_DIM, K_TEXT, K_BG);
-    ui_row(5, 152, 26, "Bluetooth", b == 0 ? "OFF" : b == 1 ? "STARTING" : b == 2 ? "MIDI READY" : "FAILED", K_DIM,
-           b == 2 ? K_TEAL : b == 3 ? K_CORAL : K_TEXT, K_BG);
     {
         char nm[40];
         uint16_t rc = radio_st == RS_PLAYING ? K_TEAL : radio_st == RS_ERROR ? K_CORAL : K_TEXT;
@@ -649,7 +651,7 @@ static void ui_status(void)
             w_cpy(nm, radio_why, sizeof nm);
         else
             w_cpy(nm, radio_status_str(), sizeof nm);
-        ui_row(6, 178, 26, "Radio", nm, K_DIM, rc, K_BG);
+        ui_row(5, 152, 26, "Radio", nm, K_DIM, rc, K_BG);
     }
     ui_row(13, 214, 26, wifi_st == WS_OFF ? "PLAY wifi on  SEL networks" : "PLAY wifi off  SEL networks",
            "HOME", K_DIM, K_DIM, K_PANEL);
@@ -948,7 +950,6 @@ static void fm1_main(void)
         switch (cmd) {
         case 1: wifi_power(1); break;
         case 5: wifi_power(0); break;
-        case 2: if (ble_status() == 0) ble_start(); break;
         case 3: ui_scan(); break;
         case 4: wifi_scan_collect(); break;
         case 0x20:
@@ -1158,9 +1159,13 @@ static void fm1_main(void)
             plat_leds(ui_leds_off ? 0u : lb, ui_leds_off ? 0u : lk);
         }
 
+        if (url_restart) {                        /* wifi_ctl url: the stream again, from the new address */
+            url_restart = 0;
+            if (radio_st != RS_OFF)
+                radio_stop();                     /* radio_ui_service starts it again (the station is unchanged) */
+        }
         rg_service();
         radio_ui_service();
-        ble_poll();
         wifi_poll();
         if (wifi_st != WS_CONNECTED && radio_mode != 2 && radio_st != RS_OFF && radio_st != RS_ERROR)
             radio_stop();                         /* the network went: so does the stream */
