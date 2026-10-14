@@ -6,7 +6,25 @@
 static volatile uint8_t ble_mute;                 /* test: no audio render while BT runs (main_fm1.c) */
 
 /* ---- the platform the shim asks for */
-uint32_t shim_ms(void) { return fm1_uptime_ms(); }   /* experiment: TIMER4, not the timer-5 tick (masked while BT starts) */
+/* milliseconds since boot, from TIMER4 (it runs while BT's start masks the timer-5 tick). TIMER4 wraps every
+ * 2^32 / 24 MHz = 179 s, and the shim's timeouts, lwIP and the WiFi driver's jiffies must not see time jump back:
+ * its deltas are summed (called far more often than every 179 s) */
+uint32_t shim_irq_save(void);
+void shim_irq_restore(uint32_t f);
+uint32_t shim_ms(void)
+{
+    static uint32_t last, acc, ms;
+    uint32_t f = shim_irq_save(), now = fm1_ticks(), r;     /* nests: called inside the shim's critical sections */
+    acc += now - last;
+    last = now;
+    if (acc >= 1000u * FM1_TICKS_PER_US) {
+        ms += acc / (1000u * FM1_TICKS_PER_US);
+        acc %= 1000u * FM1_TICKS_PER_US;
+    }
+    r = ms;
+    shim_irq_restore(f);
+    return r;
+}
 
 static volatile uint32_t shim_depth;
 uint32_t shim_irq_save(void)                     /* nests, unlike irq_save(): the shim calls itself */
@@ -20,22 +38,62 @@ void shim_irq_restore(uint32_t f)
     if (shim_depth && --shim_depth == 0)
         fm1_irq_on();
 }
-int shim_in_irq(void) { return 0; }
+/* the nesting is each task's own, as FreeRTOS keeps it: a task that waits inside a critical section must
+ * not leave the interrupts off for the others (os.c switch_to) */
+uint32_t shim_irq_depth(void) { return shim_depth; }
+uint32_t shim_irq_hold(void)
+{
+    fm1_irq_off();
+    return shim_depth;
+}
+void shim_irq_resume(uint32_t depth)
+{
+    shim_depth = depth;
+    if (!depth)
+        fm1_irq_on();
+}
+/* in an interrupt: interrupts run on the system stack (crt0: ssp), tasks and the main loop elsewhere */
+int shim_in_irq(void)
+{
+    uint32_t sp = fm1_sp_inl();
+    return sp >= (uint32_t)(uintptr_t)_guard1 && sp <= (uint32_t)(uintptr_t)_sstack_top;
+}
+volatile uint32_t shim_isr_blocks;                /* blocking calls refused in an interrupt (os.c) */
 /* every task waits: run what is due (a timer may be what they wait for) and keep the watchdog fed,
  * whichever context we are in (btstack_init waits in the main loop's) */
+#ifndef SHIM_WDT_FEED
+#define SHIM_WDT_FEED() fm1_wdt_feed()
+#endif
 static void ble_stuck_check(void);
+static void (*shim_idle_hook)(void);             /* the WiFi PoC: answer the wire while every task waits */
 void shim_idle(void)
 {
     static uint8_t in;
-    fm1_wdt_feed();
+    SHIM_WDT_FEED();
     if (!in) {
         in = 1;
-        shim_timers();
+        shim_timers_post();                       /* never run callbacks inside a task's wait */
         ble_stuck_check();
+        if (shim_idle_hook)
+            shim_idle_hook();
         in = 0;
     }
 }
 void shim_reboot(void) { fm1_reboot(); }
+/* the shim's delays (JieLi's delay_us and friends): from RAM, timed by TIMER4, nothing called (fm1-ctl) */
+#ifdef SHIM_WATCH_ADDR
+/* debugging the trim crash: the word the radio trim's delay_us return address is found overwritten in,
+ * write-protected while we wait (a CPU writer faults with its pc; no fault = DMA) */
+__attribute__((section(".ram_text"), noinline, used)) void shim_delay_us(uint32_t us)
+{
+    uint32_t sp = fm1_sp_inl();
+    fm1_guard_watch_inl(sp + SHIM_WATCH_FRAME, sp + SHIM_WATCH_FRAME + 255u);   /* above our frame: the callers' */
+    fm1_busy_us_inl(us);
+    fm1_guard_unwatch_inl();
+}
+#else
+__attribute__((section(".ram_text"), noinline, used)) void shim_delay_us(uint32_t us) { fm1_busy_us_inl(us); }
+#endif
 
 
 /* the radio's interrupts sit above the audio render (ALNK0, 3) and the input timer (4): JieLi
@@ -44,7 +102,7 @@ static uint8_t ble_irqs[8], ble_nirq;
 /* diagnostics (shim/trace.S): every entry into JieLi's two ISRs is noted here, count at +0, their
  * handlers at +4 and +8, a ring of 16 {reti, sp - 32} at +32; kept through a reset for the crash note */
 struct { uint32_t n, handler[2], rsv[5], ring[16][2]; } shim_isr_trace __attribute__((section(".noinit")));
-extern void shim_tramp_event(void), shim_tramp_rx(void);
+extern void shim_tramp_event(void), shim_tramp_rx(void), shim_tramp_wifi(void);
 volatile uint32_t shim_delay_from __attribute__((section(".noinit"))), shim_delay_n __attribute__((section(".noinit")));
 void shim_request_irq(int index, int prio, void (*handler)(void))
 {
@@ -55,6 +113,9 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
     } else if (index == 29) {
         shim_isr_trace.handler[1] = (uint32_t)(uintptr_t)handler;
         handler = shim_tramp_rx;
+    } else if (index == 52) {                     /* WiFi: counted the same way (rsv[0] = +12) */
+        shim_isr_trace.rsv[0] = (uint32_t)(uintptr_t)handler;
+        handler = shim_tramp_wifi;
     }
     fm1_guard_unlock_top();
     fm1_irq_attach((uint32_t)index, handler, (uint32_t)(prio + 5 > 7 ? 7 : prio + 5));
@@ -62,11 +123,19 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
     irq_restore(f);
     if (ble_nirq < sizeof ble_irqs)
         ble_irqs[ble_nirq++] = (uint8_t)index;
+    {
+        char b[16] = "irq ___ p_";
+        b[4] = (char)('0' + index / 100 % 10);
+        b[5] = (char)('0' + index / 10 % 10);
+        b[6] = (char)('0' + index % 10);
+        b[9] = (char)('0' + (prio & 7));
+        shim_log(b);
+    }
 }
 
 /* a short log for the screen, kept through a reset (.noinit): after a crash or a watchdog reset the
  * Setup page shows what the last run said */
-#define BLE_LOG_N 12
+#define BLE_LOG_N 256
 #define BLE_LOG_MAGIC 0x424C4531u                 /* "BLE1" */
 static struct {
     uint32_t magic, w, count, crash_seen, running, repeat, probe;   /* probe: nmi_probe(7) at the last start */
@@ -80,7 +149,7 @@ static struct {
 #define ble_log_count blog.count
 void shim_wdt(void)                               /* also: which interrupts are pending while the library spins */
 {
-    fm1_wdt_feed();
+    SHIM_WDT_FEED();
     if (blog.magic == BLE_LOG_MAGIC)
         fm1_ipnd_or(blog.pnd_seen);
 }
@@ -352,11 +421,43 @@ extern void shim_os_dump(void);
 static void ble_stuck_check(void)                 /* still starting after 3 s: say what each task waits for */
 {
     static uint32_t said;
-    if (ble_state == BLE_STARTING && fm1_uptime_ms() - ble_t0 > 3000u && said != ble_t0) {
+    if (ble_state == BLE_STARTING && shim_ms() - ble_t0 > 3000u && said != ble_t0) {
         said = ble_t0;
         shim_log("still starting after 3 s:");
         shim_os_dump();
     }
+}
+
+/* a fresh log (kept through resets), for a start that is not BLE's */
+static void shim_log_begin(const char *first)
+{
+    blog.magic = BLE_LOG_MAGIC;
+    blog.w = blog.count = blog.repeat = 0;
+    memset(blog.line, 0, sizeof blog.line);
+    shim_log(first);
+}
+
+extern int os_taskq_pend(const char *fmt, int *argv, int argc);
+/* the SDK's "sys_timer" task: timers added to it (and the WiFi library's posts) arrive as
+ * [Q_CALLBACK, fn, priv], which os_taskq_pend runs */
+static void sys_timer_task(void *p)
+{
+    int m[8];
+    (void)p;
+    for (;;)
+        os_taskq_pend("taskq", m, 8);
+}
+
+/* the scheduler, once: BLE and WiFi both put their tasks on it */
+static void shim_up(void)
+{
+    static uint8_t up;
+    if (up)
+        return;
+    up = 1;
+    shim_os_init();
+    fm1_guard_stack_floor(shim_stacks_lo());      /* the tasks' stacks are in the pool */
+    task_create(sys_timer_task, 0, "sys_timer");
 }
 
 static void ble_start(void)
@@ -371,7 +472,7 @@ static void ble_start(void)
     blog.w = blog.count = 0;
     blog.crash_seen = fm1_crash.count;
     blog.running = 1;
-    ble_t0 = fm1_uptime_ms();
+    ble_t0 = shim_ms();
     shim_log("BT: starting");
     {
         char e[40];
@@ -382,7 +483,7 @@ static void ble_start(void)
     shim_delay_n = 0;
     memset(blog.pnd_seen, 0, sizeof blog.pnd_seen);
     shim_delay_from = 0;
-    blog.t0_up = fm1_uptime_ms();
+    blog.t0_up = shim_ms();
     {   /* experiment: no audio or timer interrupt while the stack starts (ble_poll gives them back) */
         uint32_t f = irq_save();
         fm1_irq_mask(FM1_IRQ_ALNK0);
@@ -391,9 +492,14 @@ static void ble_start(void)
         irqs_masked = 1;
         shim_log("audio+timer irqs masked");
     }
-    shim_os_init();
-    fm1_guard_stack_floor(shim_stacks_lo());      /* the tasks' stacks are in the pool */
+    shim_up();
     lmp_set_sniff_disable();
+    /* transmit power 0..11 (fm1-ctl): the SDK sets it in a config start-up the shim does not run;
+     * left alone the library transmits at its lowest */
+    {
+        extern void bt_max_pwr_set(uint8_t pwr, uint8_t pg_pwr, uint8_t iq_pwr, uint8_t ble_pwr);
+        bt_max_pwr_set(8, 6, 6, 11);
+    }
     lib_make_ble_address(addr, (uint8_t *)bt_get_mac_addr());
     le_controller_set_mac(addr);
     btstack_init();
@@ -410,7 +516,7 @@ static void ble_poll(void)
     ble_stuck_check();
     if (ble_state == BLE_READY)
         ble_irqs_back("irqs back: BT ready");
-    else if (fm1_uptime_ms() - ble_t0 > 15000u)
+    else if (shim_ms() - ble_t0 > 15000u)
         ble_irqs_back("irqs back: 15 s, not ready");
     {   /* the reverb's table was overwritten: say what was there (omni.c plate_ok) */
         extern volatile uint32_t om_fault[5], om_fault_count;
@@ -434,9 +540,9 @@ static void ble_poll(void)
     }
     {   /* every two seconds while running: BLE interrupts taken, stack events seen */
         static uint32_t t2;
-        if (ble_state == BLE_READY && fm1_uptime_ms() - t2 > 2000u) {
+        if (ble_state == BLE_READY && shim_ms() - t2 > 2000u) {
             char b[40] = "irq ________ c_ rx ________ tx ________";
-            t2 = fm1_uptime_ms();
+            t2 = shim_ms();
             hex8(b + 4, shim_isr_trace.n);
             b[14] = (char)('0' + ble_midi_connected());
             hex8(b + 19, ble_rx_count);

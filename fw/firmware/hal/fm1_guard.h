@@ -108,6 +108,33 @@ static void fm1_guard_stack_floor(uint32_t lo)
     fm1__dbg_lock();
 }
 
+/* WiFi debugging: write-protect lo..hi (window 3) for a while, from RAM code (inline, nothing called):
+ * a CPU write there raises the exception at the writing instruction */
+FM1_INLINE void fm1_guard_watch_inl(uint32_t lo, uint32_t hi)
+{
+    if (!(FM1_DBG_WR_EN & 1u))
+        FM1_DBG_WR_EN = 0xE7u;
+    FM1_WR_LIMIT_L(3) = lo;
+    FM1_WR_LIMIT_H(3) = hi;
+    FM1_C0_WR_LIMIT_EN |= 8u;
+    if (FM1_DBG_WR_EN & 1u)
+        FM1_DBG_WR_EN = 0xE7u;
+}
+FM1_INLINE uint32_t fm1_sp_inl(void)
+{
+    uint32_t v;
+    __asm__ volatile("%0 = sp" : "=r"(v));
+    return v;
+}
+FM1_INLINE void fm1_guard_unwatch_inl(void)
+{
+    if (!(FM1_DBG_WR_EN & 1u))
+        FM1_DBG_WR_EN = 0xE7u;
+    FM1_C0_WR_LIMIT_EN &= ~8u;
+    if (FM1_DBG_WR_EN & 1u)
+        FM1_DBG_WR_EN = 0xE7u;
+}
+
 /* reopen the reserved top of RAM (mailbox write before a UBOOT reset) */
 static void fm1_guard_unlock_top(void)
 {

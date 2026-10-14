@@ -39,6 +39,13 @@ void shim_idle(void);                 /* the main loop has nothing to run: retur
 void shim_request_irq(int index, int prio, void (*handler)(void));
 void shim_reboot(void);
 void shim_wdt(void);                  /* feed the watchdog: long hardware loops (the radio's calibration) */
+void shim_delay_us(uint32_t us);      /* a busy wait in RAM (.ram_text), the watchdog fed: the radio trim's delays */
+int shim_task_pid(const char *name);
+int shim_task_last(void);             /* the slot task_create filled last */  /* thread_fork's pid: the task's slot, 0 = none */
+void shim_task_end(int pid);
+uint32_t shim_irq_hold(void);        /* interrupts off; the current nesting (a task switch) */
+void shim_irq_resume(uint32_t depth);  /* a task resumes: its nesting, interrupts on at 0 */
+void shim_timers_post(void);          /* due timers posted to their owners (a task's idle) */
 void shim_log(const char *s);         /* a line for the screen's log */
 int shim_store_load(void *dst, uint32_t max);   /* syscfg's flash object */
 int shim_store_save(const void *src, uint32_t len);

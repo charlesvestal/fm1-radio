@@ -53,6 +53,7 @@ SDK_SHA256 = {
 
 PRODUCT = "FM-1_899"                # package identity; release builds are FM-1_8XXYYZZ (see main)
 VERSION = None                      # FELUCCA_VERSION for release builds (default: firmware/src/ui.c)
+WIFI_BUILD = False                  # --wifi: compile main_wifi.c (WiFi PoC) instead of main.c
 
 
 def toolchain():
@@ -68,14 +69,40 @@ def use_docker():
     return os.environ.get("JIELI_DOCKER", "0" if native else "1") == "1"
 
 
+_BUILDER = None
+_BUILDER_LOCK = __import__("threading").Lock()
+
+
+def builder():
+    """one long-lived toolchain container per source tree (fm1-fomni's): a container per tool call cost
+    most of the build; it stops by itself after an hour without a build"""
+    global _BUILDER
+    with _BUILDER_LOCK:
+        if _BUILDER:
+            return _BUILDER
+        name = "jieli-" + hashlib.sha1(str(SRC).encode()).hexdigest()[:10]
+        st = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", name], capture_output=True, text=True)
+        if st.stdout.strip() != "true":
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+            r = subprocess.run(["docker", "run", "-d", "--rm", "--name", name, "--platform", "linux/amd64",
+                                "-v", f"{SRC}:/work", "-v", f"{toolchain()}:/opt/jieli:ro", "-w", "/work",
+                                DOCKER_IMAGE, "sh", "-c", "sleep 3600"], capture_output=True, text=True)
+            if r.returncode:
+                sys.stderr.write(r.stderr)
+                raise SystemExit("build: cannot start the toolchain container")
+        else:
+            subprocess.run(["docker", "exec", "-d", name, "sh", "-c", "sleep 3600 && kill 1"], capture_output=True)
+        _BUILDER = name
+        return name
+
+
 def tc(tool, *args):
     """run a toolchain binary (pi32v2/bin/..., common/bin/...) with cwd SRC; paths relative to SRC"""
     rel = [str(Path(a).resolve().relative_to(SRC)) if isinstance(a, Path) else a for a in args]
     if tool == "cc":                # the toolchain's cc wrapper needs python3; call clang directly
         tool, rel = "pi32v2/bin/clang", ["-target", "pi32v2", *rel]
     if use_docker():
-        cmd = ["docker", "run", "--rm", "--platform", "linux/amd64", "-v", f"{SRC}:/work",
-               "-v", f"{toolchain()}:/opt/jieli:ro", "-w", "/work", DOCKER_IMAGE, f"/opt/jieli/{tool}", *rel]
+        cmd = ["docker", "exec", "-w", "/work", builder(), f"/opt/jieli/{tool}", *rel]
     else:
         cmd = [str(toolchain() / tool), *rel]
     r = subprocess.run(cmd, cwd=SRC, capture_output=True, text=True)
@@ -96,6 +123,8 @@ def tc_all(*cmds):
 def generate():
     """generated headers: the font (Felucca's)"""
     GEN.mkdir(parents=True, exist_ok=True)
+    if (GEN / "felucca_font.h").exists():
+        return
     r = subprocess.run([sys.executable, str(SRC / "tools" / "gen_font.py"), str(GEN / "felucca_font.h")],
                        capture_output=True, text=True)
     sys.stdout.write(r.stdout)
@@ -168,6 +197,18 @@ def build_loader():
 
 # ---- BLE experiment: JieLi's BT libraries (closed) and a few SDK sources, on the shim (ble/shim)
 BLE_LIBS = ["btctrler.a", "btstack.a", "crypto_toolbox_Osize.a", "lib_ccm_aes.a", "wl_rf_common.a"]
+# the SDK's no-SDRAM builds (demo_audio) link the _sfc variants: smaller buffers, code from flash
+WIFI_LIBS = ["wl_wifi_sta_sfc.a", "wpasupplicant.a", "hsm.a"]
+# lwIP from the SDK's sources (its _sfc project's files and flags), with ble/lwip/lwipopts_sfc.h: a wider TCP window
+LWIP_DIRS = ["src/api", "src/core", "src/core/ipv4", "src/netif", "port", "apps/sock_api", "apps/dhcp_srv", "apps/ntp"]
+LWIP_SKIP = {"bridgeif.c", "bridgeif_fdb.c", "lowpan6.c", "lowpan6_ble.c", "lowpan6_common.c", "slipif.c", "zepif.c",
+             "bt_ethernetif.c", "lte_ethernetif.c", "wired_ethernetif.c", "ext_wireless_ethernetif.c",
+             "wifi_raw_ethernetif.c", "ethernetif.c"}
+LWIP_CF = ["-D_POSIX_SOURCE", "-D_SYS_SELECT_H", "-DUSE_RTOS", "-DLIWP_USE_SMALL_MEMORY", "-Wno-unused-value"]
+LWIP_INC = ["include_lib/net/device", "include_lib/net/device/eth", "include_lib/net/lwip_2_1_3/lwip/app",
+            "include_lib/net/lwip_2_1_3/lwip/app/sock_api", "include_lib/net/lwip_2_1_3/lwip/app/dhcp_srv",
+            "include_lib/net/lwip_2_1_3/lwip/port/arch", "include_lib/net/lwip_2_1_3/lwip/src/include/lwip",
+            "include_lib/system/device", "include_lib/system/os/FreeRTOS/pi32_lto"]
 BLE_SDK_SRC = ["apps/common/config/bt_profile_config.c",
                "apps/common/config/log_config/lib_btctrler_config.c",
                "apps/common/config/log_config/lib_btstack_config.c"]
@@ -177,7 +218,13 @@ BLE_INC = ["include_lib", "include_lib/driver", "include_lib/driver/device", "in
            "include_lib/btstack/third_party/rcsp", "include_lib/utils", "include_lib/utils/syscfg",
            "include_lib/utils/event", "include_lib/media", "include_lib/media/cpu/wl82", "apps",
            "apps/demo/demo_ble/include", "apps/common", "apps/common/include", "apps/common/config/include",
-           "include_lib/btstack", "include_lib/net", "apps/common/ble/include", "include_lib/newlib/include"]
+           "include_lib/btstack", "include_lib/net", "apps/common/ble/include", "include_lib/newlib/include",
+           "include_lib/net/wifi", "include_lib/net/lwip_2_1_3/lwip/src/include",
+           "include_lib/net/lwip_2_1_3/lwip/src/include/lwip",
+           "include_lib/net/lwip_2_1_3/lwip/src/include/netif",
+           "include_lib/net/lwip_2_1_3/lwip/port",
+           "include_lib/net/lwip_2_1_3/lwip/port/arch",
+           "include_lib/net/HSM"]
 BLE_CF = ["-integrated-as", "-mcpu=r3", "-mfprev1", "-fno-common", "-Oz", "-flto", "-fallow-pointer-null",
           "-fprefer-gnu-section", "-femulated-tls", "-fms-extensions", "-w", "-DSUPPORT_MS_EXTENSIONS",
           "-DCONFIG_RELEASE_ENABLE", "-DCONFIG_CPU_WL82", "-DCONFIG_FREE_RTOS_ENABLE", "-DCONFIG_THREAD_ENABLE",
@@ -201,21 +248,38 @@ def ble_units():
             (dst / f).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(sdk / f, dst / f)
         (dst / "lib").mkdir(exist_ok=True)
-        for f in BLE_LIBS:
+        for d in LWIP_DIRS:                        # lwIP's sources (the container sees only this tree)
+            for c in (sdk / "lib/net/lwip_2_1_3" / d).glob("*.c"):
+                if c.name not in LWIP_SKIP:
+                    (dst / "lwip" / d).mkdir(parents=True, exist_ok=True)
+                    shutil.copy(c, dst / "lwip" / d / c.name)
+        for f in BLE_LIBS + WIFI_LIBS:
             shutil.copy(sdk / "cpu/wl82/liba" / f, dst / "lib" / f)
         shutil.copy(sdk / "include_lib/newlib/pi32v2-lib/libcompiler_rt.a", dst / "lib")
         (dst / ".copied").write_text("")
-    inc = [f"-I{dst.relative_to(SRC) / d}" for d in BLE_INC] + ["-Ible/shim"]
+    inc = ["-Ible/wifi", "-Ible/shim"] + [f"-I{dst.relative_to(SRC) / d}" for d in BLE_INC]
     (OUT / "ble" / "o").mkdir(parents=True, exist_ok=True)
     units, objs = [], []
     for a in ("ctx", "trace"):
         units.append(("cc", "-c", SRC / "ble" / "shim" / f"{a}.S", "-o", OUT / "ble" / "o" / f"{a}.o"))
         objs.append(OUT / "ble" / "o" / f"{a}.o")
-    for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "midi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
+    lwip_inc = ["-Ible/lwip", *inc, *[f"-I{dst.relative_to(SRC) / d}" for d in LWIP_INC]]
+    if WIFI_BUILD:
+        for d in LWIP_DIRS:
+            for f in sorted((dst / "lwip" / d).glob("*.c")):
+                o = OUT / "ble" / "o" / ("lwip_" + f.stem + ".o")
+                units.append(("cc", *BLE_CF, *LWIP_CF, *lwip_inc, "-c", f, "-o", o))
+                objs.append(o)
+    for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "midi").glob("*.c"),
+              *(SRC / "ble" / "wifi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
         o = OUT / "ble" / "o" / (f.stem + ".o")
-        units.append(("cc", *BLE_CF, *inc, "-c", f, "-o", o))
+        if f.parent.name == "wifi" and WIFI_BUILD:   # the radio's sockets: lwIP's options as it is built
+            units.append(("cc", *BLE_CF, *LWIP_CF, *lwip_inc, "-c", f, "-o", o))
+            objs.append(o)
+            continue
+        units.append(("cc", *BLE_CF, *(["-DSHIM_HEAP_KB=136u", *(["-DSHIM_WIFI_RX_MODERATE"] if os.environ.get("WIFI_RX") == "moderate" else []), *(["-DSHIM_GLOBAL_IRQ"] if os.environ.get("SHIM_IRQ") == "global" else [])] if WIFI_BUILD else []), *inc, "-c", f, "-o", o))
         objs.append(o)
-    libs = ["--start-group", *[dst / "lib" / f for f in BLE_LIBS], dst / "lib" / "libcompiler_rt.a", "--end-group"]
+    libs = ["--start-group", *[dst / "lib" / f for f in BLE_LIBS + WIFI_LIBS], dst / "lib" / "libcompiler_rt.a", "--end-group"]
     return units, objs, libs
 
 
@@ -228,17 +292,21 @@ def build_app():
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DOM_VERSION="{VERSION}"')
+    main_src = "main_wifi.c" if WIFI_BUILD else "main.c"
+    if WIFI_BUILD:
+        flags.append("-Ifirmware/third_party/compat")   # minimp3's <string.h> / <stdlib.h>
     o2 = [f if f != "-Os" else "-O2" for f in flags]
     units = [("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
              ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
              ("cc", "-c", FW / "hal" / "fm1_isr.S", "-o", OUT / "fm1_isr.o"),
-             ("cc", *flags, "-c", FW / "src" / "main.c", "-o", OUT / "main.o")]
+             ("cc", *flags, "-c", FW / "src" / main_src, "-o", OUT / "main.o")]
     objs = [OUT / "crt0.o", OUT / "fm1_vec.o", OUT / "fm1_isr.o", OUT / "main.o"]
     (OUT / "o2").mkdir(parents=True, exist_ok=True)
-    for u in O2_UNITS:
-        o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
-        units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
-        objs.append(o)
+    if not WIFI_BUILD:
+        for u in O2_UNITS:
+            o = OUT / "o2" / (u.replace("/", "_")[:-2] + ".o")
+            units.append(("cc", *o2, "-c", FW / "src" / u, "-o", o))
+            objs.append(o)
     b_units, b_objs, b_libs = ble_units()
     units += b_units
     tc_all(*units)
@@ -311,10 +379,10 @@ def check(img, syms, dis, rt):
         return int(mm.group(1), 16) if mm else 0
     bss = sym("_bss_end") - 0x01C08000
     pool = sym("_pool_end") - sym("_pool_start")
-    notes.append(f"image {len(img)} B; RAM .data+.bss {bss} B of 98304; pool {pool} B of {0x54000}")
-    if bss > 96 * 1024:
+    notes.append(f"image {len(img)} B; RAM .data+.bss {bss} B of {128 * 1024}; pool {pool} B of {0x4C000}")
+    if bss > 128 * 1024:
         errors.append("RAM region overflow")
-    if 0x54000 - pool < 8192:                     # keep >= 8 KiB of the pool spare
+    if 0x4C000 - pool < 8192:                     # keep >= 8 KiB of the pool spare
         errors.append(f"pool headroom {0x54000 - pool} B < 8192 B")
     return errors, notes
 
@@ -364,11 +432,15 @@ def mmio_check():
 
 
 def main():
-    global PRODUCT, VERSION
+    global PRODUCT, VERSION, WIFI_BUILD
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", metavar="X.Y[.Z]", help="release build: identity FM-1_8XXYYZZ, version string X.Y[.Z]")
+    ap.add_argument("--wifi", action="store_true", help="WiFi PoC build: compile main_wifi.c (no synth)")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
     a = ap.parse_args()
+    if a.wifi:
+        WIFI_BUILD = True
+        PRODUCT = "FM-1_000"                     # digits only: the installers parse it
     name = "omni.fwsc"
     if a.release:
         # identity FM-1_8 + major, minor, patch as two digits each (0.1 -> FM-1_8000100): FM-1 is the

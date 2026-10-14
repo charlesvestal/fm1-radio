@@ -253,6 +253,21 @@ static int fl_write(uint32_t off, const uint8_t *src_ram, uint32_t n)
     return 0;
 }
 
+/* Read straight from the chip (not through the XIP cache), with the interrupts off a piece at a time. */
+static int fl_read(uint32_t off, uint8_t *dst, uint32_t n)
+{
+    while (n) {
+        uint32_t chunk = n > 256u ? 256u : n, f;
+        int rc;
+        f = irq_save();
+        rc = FL_FAR(fl_read_ram)(off, dst, chunk);
+        irq_restore(f);
+        if (rc) return rc;
+        off += chunk; dst += chunk; n -= chunk;
+    }
+    return 0;
+}
+
 /* Read back through XIP (needs fl_plain_window_init) and compare. */
 static int fl_verify_xip(uint32_t off, const uint8_t *ref, uint32_t n)
 {

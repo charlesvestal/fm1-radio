@@ -306,6 +306,7 @@ static void fm1_main(void)
     fm1_delay_ms(400);
     ui_init();
     ble_boot_note();
+    wifi_start();
 
     for (;;) {
         fm1_wdt_feed();
@@ -357,6 +358,7 @@ static void fm1_main(void)
         cdc_task();
 #endif
         ble_poll();                                 /* BLE experiment: its tasks, when started */
+        wifi_poll();
         if (fm1_ms - last_frame >= 16u) {           /* ~60 frames/s at most; input in between */
             last_frame = fm1_ms;
             om_dbg.ui_frames++;

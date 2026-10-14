@@ -36,6 +36,7 @@
 
 	BT_TRAMP shim_tramp_event, 4
 	BT_TRAMP shim_tramp_rx, 8
+	BT_TRAMP shim_tramp_wifi, 12
 
 	.section .text.isr_soft0,"ax",@progbits
 	.globl isr_soft0
