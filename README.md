@@ -215,7 +215,7 @@ The image is 545 KB, which leaves about 36 KB free.
 | The shim's task table: 14 tasks, each with a 2 KB message queue | 30 KB |
 | **WiFi in all** | **about 104 KB** |
 | BLE: controller, stack and MIDI | 9 KB |
-| The platform: audio buffers, storage, USB | about 20 KB |
+| The platform and the radio: audio buffers, storage, USB, screen state | about 15 KB |
 
 Everything else goes in the pool.
 
