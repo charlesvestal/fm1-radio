@@ -908,6 +908,17 @@ static void fm1_main(void)
             bootguard.failed = 0;
         }
 
+        {   /* MASTER: the volume (FoMni's curve) */
+            static int32_t knob = 1024 * 16;
+            int32_t a = fm1_adc_read(FM1_ADC_MASTER);
+            if (a >= 0) {
+                uint32_t k10;
+                knob += (a * 16 - knob) / 8;
+                k10 = (uint32_t)(knob / 16);
+                master_q12 = (k10 * k10) >> 8;    /* 0 .. ~4096 */
+            }
+        }
+
         /* OCT- + OCT+ held 5 s: update mode */
         {
             static uint32_t t0;
