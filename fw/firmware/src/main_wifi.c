@@ -189,6 +189,7 @@ static const char *stall_task;
 
 /* ---- BLE (the existing shim + MIDI) ---- */
 #define OBJ_BLE 2
+#define BLE_LOG_N 64                      /* 2.5 KB: NOINIT's room goes to the https client's state */
 #define OBJ_WIFI OBJ_PROJ                 /* no project in this firmware: its object holds the networks */
 #include "app/ble.c"
 

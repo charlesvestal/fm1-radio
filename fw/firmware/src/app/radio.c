@@ -25,6 +25,26 @@ extern volatile int radio_net_state;
 extern volatile uint32_t radio_rd, radio_wr;
 extern char radio_net_why[32], radio_net_name[48];
 int radio_net_start(const char *u, uint8_t *buf, uint32_t size);
+
+/* for the https client's random generator (radio_net.c): no hardware generator is set up, so the timer's
+ * jitter around converter reads, the converters' low bits and the network's timing so far, mixed. BearSSL
+ * hashes it (HMAC-DRBG). Weak by a security standard; fine for keeping a radio stream private-ish. */
+void radio_entropy(uint8_t *p, unsigned n)
+{
+    static uint32_t carry = 0x9E3779B9u;
+    uint32_t h = carry ^ fm1_ms ^ radio_wr * 0x85EBCA6Bu;
+    unsigned i, k;
+    for (i = 0; i < n; i++) {
+        for (k = 0; k < 8u; k++) {
+            int32_t a = fm1_adc_read(k & 1u ? FM1_ADC_MASTER : FM1_ADC_BATT);
+            h ^= fm1_ticks() + (uint32_t)a * 0x27D4EB2Fu;
+            h = (h ^ (h >> 15)) * 0x2C1B3C6Du;
+            h ^= h >> 12;
+        }
+        p[i] = (uint8_t)(h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24));
+    }
+    carry = h;
+}
 void radio_net_stop(void);
 int radio_net_running(void);
 enum { RN_IDLE, RN_CONNECTING, RN_STREAMING, RN_ERROR, RN_ENDED };

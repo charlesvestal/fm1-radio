@@ -135,7 +135,9 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
 
 /* a short log for the screen, kept through a reset (.noinit): after a crash or a watchdog reset the
  * Setup page shows what the last run said */
+#ifndef BLE_LOG_N
 #define BLE_LOG_N 256
+#endif
 #define BLE_LOG_MAGIC 0x424C4531u                 /* "BLE1" */
 static struct {
     uint32_t magic, w, count, crash_seen, running, repeat, probe;   /* probe: nmi_probe(7) at the last start */

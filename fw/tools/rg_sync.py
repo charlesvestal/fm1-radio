@@ -331,26 +331,29 @@ def http_variant(url):
     return 'http://' + url[len('https://'):] if url.startswith('https://') else url
 
 
-def pick(chain, p):
-    """A chain that ends in 200 MP3 over http:// -> (url to store, redirect hops) or None."""
+def pick(chain, p, tls=False):
+    """A chain that ends in 200 MP3 over http:// (or https:// with tls) -> (url to store, redirect hops) or
+    None."""
     final = chain[-1]
-    if not final.startswith('http://') or '.m3u8' in final.lower():
+    ok = (lambda u: u.startswith('http://') or (tls and u.startswith('https://')))
+    if not ok(final) or '.m3u8' in final.lower():
         return None
     if p.get('status') != 200 or not is_mp3(p):
         return None
     if not TOKEN_RE.search(final):
         return final, 0
-    # earliest URL from which every hop stays on plain http and carries no token
+    # earliest URL from which every hop stays playable and carries no token
     i = len(chain) - 1
-    while i > 0 and chain[i - 1].startswith('http://') and not TOKEN_RE.search(chain[i - 1]):
+    while i > 0 and ok(chain[i - 1]) and not TOKEN_RE.search(chain[i - 1]):
         i -= 1
     if i == len(chain) - 1:
-        return None  # only the tokenised URL itself is plain http
+        return None  # only the tokenised URL itself is playable
     return chain[i], len(chain) - 1 - i
 
 
-def resolve_station(cache, ch_id):
-    """-> dict(url, type, redirects, ...) or dict(url=None, why)."""
+def resolve_station(cache, ch_id, tls=False):
+    """-> dict(url, type, redirects, tls, ...) or dict(url=None, why). Plain http is preferred; with tls, an
+    https stream when no http one plays (the FM-1's TLS costs memory and time)."""
     key = 'listen:' + ch_id
     loc = cache.get(key)
     if loc is None:
@@ -370,8 +373,8 @@ def resolve_station(cache, ch_id):
         tries.append(([alt], probe(cache, alt)))
     if loc.startswith('https://'):
         tries.append(follow(cache, http_variant(loc)))
-    for ch, pr in tries:
-        got = pick(ch, pr)
+    for ch, pr, secure in [(c, q, False) for c, q in tries] + ([(c, q, True) for c, q in tries] if tls else []):
+        got = pick(ch, pr, secure)
         if not got:
             continue
         u, hops = got
@@ -379,6 +382,7 @@ def resolve_station(cache, ch_id):
             return {'url': None, 'why': 'url too long / bad bytes'}
         h = pr.get('headers') or {}
         return {'url': u, 'type': h.get('content-type', '(sniffed)'), 'redirects': hops,
+                'tls': u.startswith('https://') or (hops > 0 and any(x.startswith('https://') for x in ch)),
                 'final': ch[-1] if hops else None,
                 'chunked': 'chunked' in h.get('transfer-encoding', '').lower(),
                 'icy': pr.get('line', '').startswith('ICY')}
@@ -413,7 +417,7 @@ def cached_json(cache, url):
     return ok, v
 
 
-def do_city(cache, entry, max_per_city):
+def do_city(cache, entry, max_per_city, tls=True):
     continent, country, city = entry
     ok, data = cached_json(cache, search_url(city, country))
     if not ok:
@@ -425,25 +429,29 @@ def do_city(cache, entry, max_per_city):
     if not ok:
         return entry, None, 'channels failed: %s' % data
     chans = stations_from(data)
-    out = []
+    out, secure = [], []                          # plain http first; https streams fill the rest
     for ch in chans:
         if len(out) >= max_per_city:
             break
-        r = resolve_station(cache, ch['id'])
+        r = resolve_station(cache, ch['id'], tls)
         if r.get('url'):
-            out.append({'name': ch['title'], 'id': ch['id'], 'url': r['url'],
-                        'type': r['type'], 'redirects': r['redirects'],
-                        'chunked': r['chunked'], 'icy': r['icy']})
-    return entry, out, '%d/%d channels playable' % (len(out), len(chans))
+            st = {'name': ch['title'], 'id': ch['id'], 'url': r['url'], 'type': r['type'],
+                  'redirects': r['redirects'], 'chunked': r['chunked'], 'icy': r['icy'], 'tls': r['tls']}
+            (secure if st['tls'] else out).append(st)
+    out += secure[:max_per_city - len(out)]
+    return entry, out, '%d/%d channels playable (%d https)' % (len(out), len(chans),
+                                                              sum(1 for x in out if x['tls']))
 
 
 # ── the table ────────────────────────────────────────────────────────────────
 
-def build_tree(results, per_city):
-    """results: {(continent,country,city): [stations]} -> sorted nested tree."""
+def build_tree(results, per_city, tls_cap=99):
+    """results: {(continent,country,city): [stations]} -> sorted nested tree. At most tls_cap https streams a
+    city (they come after the http ones)."""
     tree = {}
     for (co, cn, ci), sts in results.items():
-        sts = sts[:per_city]
+        plain = [x for x in sts if not x.get('tls')]
+        sts = (plain + [x for x in sts if x.get('tls')][:tls_cap])[:per_city]
         if not sts:
             continue
         a, b, c = ascii_name(co, 32), ascii_name(cn, 32), ascii_name(ci, 32)
@@ -516,6 +524,7 @@ def main():
     ap.add_argument('--refresh', action='store_true', help='ignore the cache')
     ap.add_argument('--cities-js', default=BROWSER_JS)
     ap.add_argument('--workers', type=int, default=WORKERS)
+    ap.add_argument('--no-tls', action='store_true', help='plain http streams only (firmware without https)')
     args = ap.parse_args()
 
     t0 = time.time()
@@ -528,7 +537,7 @@ def main():
     failed = []
     try:
         with concurrent.futures.ThreadPoolExecutor(args.workers) as ex:
-            futs = [ex.submit(do_city, cache, c, args.max_per_city) for c in cities]
+            futs = [ex.submit(do_city, cache, c, args.max_per_city, not args.no_tls) for c in cities]
             for i, f in enumerate(concurrent.futures.as_completed(futs), 1):
                 entry, sts, msg = f.result()
                 if sts is None:
@@ -540,12 +549,16 @@ def main():
         cache.save()
 
     created = int(time.time())
-    per = args.max_per_city
-    while True:
-        tree = build_tree(results, per)
+    per, cap = args.max_per_city, args.max_per_city
+    while True:                                   # too big: fewer https streams first, then fewer a city
+        tree = build_tree(results, per, cap)
         blob, counts = write_table(tree, created)
         if len(blob) <= MAX_TABLE or per <= 1:
             break
+        if cap > 0:
+            cap -= 1
+            log('table %d bytes > %d: trying %d https streams per city' % (len(blob), MAX_TABLE, cap))
+            continue
         log('table %d bytes > %d: trying %d stations per city' % (len(blob), MAX_TABLE, per - 1))
         per -= 1
     if len(blob) > MAX_TABLE:
@@ -565,12 +578,14 @@ def main():
              for s in ci['stations']]
     chunked = sum(1 for s in every if s.get('chunked'))
     redir = sum(1 for s in every if s.get('redirects'))
+    secure = sum(1 for s in every if s.get('tls'))
     log('')
     log('cities searched:              %d (%d failed, rerun to retry)' % (len(cities), len(failed)))
     log('cities with playable stations: %d' % counts[2])
     log('countries / continents:        %d / %d' % (counts[1], counts[0]))
     log('stations:                      %d (%d per city max; %d chunked; %d need a redirect '
         'followed: tokenised streams)' % (nst, per, chunked, redir))
+    log('https streams:                 %d' % secure)
     log('table:                         %d bytes (limit %d) -> %s' % (len(blob), MAX_TABLE, args.out))
     log('json:                          %s' % jpath)
     log('time:                          %.0f s' % (time.time() - t0))

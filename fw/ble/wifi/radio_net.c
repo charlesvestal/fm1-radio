@@ -1,12 +1,15 @@
-/* The radio's network side: one task that fetches an HTTP stream (Icecast / SHOUTcast, plain http) into a
+/* The radio's network side: one task that fetches an HTTP or HTTPS stream (Icecast / SHOUTcast) into a
  * ring the app's decoder drains. Built against the SDK's lwIP headers (sockets, DNS); the app sees only
- * radio_net_*. Redirects (3xx Location, http only) are followed a few times. */
+ * radio_net_*. Redirects (3xx Location) are followed a few times.
+ * HTTPS is BearSSL's client (third_party/bearssl), TLS 1.2 with ECDHE and AES-GCM. The server's certificate is NOT checked (no roots, no clock): its key is used as sent.
+ * For a radio, the worst a man in the middle can do is change the audio. */
 #include <stdint.h>
 #include <string.h>
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "lwip/netif.h"
 #include "shim.h"
+#include "bearssl.h"
 
 extern int snprintf(char *buf, unsigned long sz, const char *f, ...);
 
@@ -18,6 +21,8 @@ static uint32_t ring_size;
 #define URL_MAX 512u                              /* tokenised redirects (zeno.fm) run to ~350 */
 static char *url;                                 /* URL_MAX, from the heap once (RAM is full) */
 extern void *malloc(unsigned long n);
+extern void free(void *p);
+extern void radio_entropy(uint8_t *p, unsigned n);   /* the app's: timing and converter noise */
 static volatile uint8_t stop_req, running;
 char radio_net_why[32];
 char radio_net_name[48];                          /* icy-name, when the station sends one */
@@ -31,17 +36,157 @@ static void why(const char *s)
     shim_log(s);
 }
 
-/* "http://host[:port]/path" */
-static int split(const char *u, char *host, unsigned hmax, int *port, const char **path)
+/* ---- the connection: a socket, and TLS over it for https */
+typedef struct {
+    const br_x509_class *vtable;                  /* no checks: the first certificate's key, as sent */
+    br_x509_decoder_context dec;
+    int depth;
+} nov_t;
+typedef struct {
+    br_ssl_client_context cc;
+    nov_t x509;
+    br_sslio_context io;
+} tls_t;
+static int sock = -1;
+/* the state (4.5 KB) in the NOINIT region the smaller log left free; the 16.7 KB record buffer (one record
+ * at a time, both ways) from the heap while an https stream is open */
+static tls_t tls_state __attribute__((section(".noinit")));
+static tls_t *tls;
+static unsigned char *tls_buf;
+
+static void nov_start_chain(const br_x509_class **c, const char *name) { (void)name; ((nov_t *)c)->depth = 0; }
+static void nov_start_cert(const br_x509_class **c, uint32_t len)
+{
+    nov_t *x = (nov_t *)c;
+    (void)len;
+    if (x->depth == 0)
+        br_x509_decoder_init(&x->dec, 0, 0);
+}
+static void nov_append(const br_x509_class **c, const unsigned char *b, size_t n)
+{
+    nov_t *x = (nov_t *)c;
+    if (x->depth == 0)
+        br_x509_decoder_push(&x->dec, b, n);
+}
+static void nov_end_cert(const br_x509_class **c) { ((nov_t *)c)->depth++; }
+static unsigned nov_end_chain(const br_x509_class **c)
+{
+    nov_t *x = (nov_t *)c;
+    return x->depth && br_x509_decoder_get_pkey(&x->dec) ? 0u : (unsigned)BR_ERR_X509_EMPTY_CHAIN;
+}
+static const br_x509_pkey *nov_get_pkey(const br_x509_class *const *c, unsigned *usages)
+{
+    if (usages)
+        *usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    return br_x509_decoder_get_pkey(&((nov_t *)c)->dec);
+}
+static const br_x509_class NOV = {sizeof(nov_t), nov_start_chain, nov_start_cert, nov_append, nov_end_cert,
+                                  nov_end_chain, nov_get_pkey};
+
+static int sock_rd(void *ctx, unsigned char *b, size_t n)
+{
+    int r = recv(*(int *)ctx, b, n, 0);
+    return r > 0 ? r : -1;
+}
+static int sock_wr(void *ctx, const unsigned char *b, size_t n)
+{
+    int r = send(*(int *)ctx, b, n, 0);
+    return r > 0 ? r : -1;
+}
+
+/* what streaming servers offer: ECDHE with AES-GCM (P-256 for the exchange and ECDSA keys, or RSA keys) */
+static const uint16_t SUITES[] = {
+    BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, BR_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+    BR_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, BR_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384};
+
+static int tls_open(int s, const char *host)
+{
+    br_ssl_engine_context *e;
+    uint8_t seed[32];
+    tls_buf = malloc(BR_SSL_BUFSIZE_MONO);
+    if (!tls_buf)
+        return -1;
+    tls = &tls_state;
+    e = &tls->cc.eng;
+    br_ssl_client_zero(&tls->cc);
+    br_ssl_engine_set_versions(e, BR_TLS12, BR_TLS12);
+    br_ssl_engine_set_suites(e, SUITES, sizeof SUITES / sizeof SUITES[0]);
+    br_ssl_engine_set_rsavrfy(e, &br_rsa_i31_pkcs1_vrfy);
+    br_ssl_engine_set_ec(e, &br_ec_p256_m31);
+    br_ssl_engine_set_ecdsa(e, &br_ecdsa_i31_vrfy_asn1);
+    br_ssl_engine_set_hash(e, br_sha1_ID, &br_sha1_vtable);
+    br_ssl_engine_set_hash(e, br_sha256_ID, &br_sha256_vtable);
+    br_ssl_engine_set_hash(e, br_sha384_ID, &br_sha384_vtable);
+    br_ssl_engine_set_prf_sha256(e, &br_tls12_sha256_prf);
+    br_ssl_engine_set_prf_sha384(e, &br_tls12_sha384_prf);
+    br_ssl_engine_set_gcm(e, &br_sslrec_in_gcm_vtable, &br_sslrec_out_gcm_vtable);
+    br_ssl_engine_set_aes_ctr(e, &br_aes_small_ctr_vtable);
+    br_ssl_engine_set_ghash(e, &br_ghash_ctmul32);
+    tls->x509.vtable = &NOV;
+    br_ssl_engine_set_x509(e, &tls->x509.vtable);
+    br_ssl_engine_set_buffer(e, tls_buf, BR_SSL_BUFSIZE_MONO, 0);
+    radio_entropy(seed, sizeof seed);
+    br_ssl_engine_inject_entropy(e, seed, sizeof seed);
+    if (!br_ssl_client_reset(&tls->cc, host, 0)) {
+        free(tls_buf);
+        tls_buf = 0;
+        tls = 0;
+        return -1;
+    }
+    sock = s;
+    br_sslio_init(&tls->io, e, sock_rd, &sock, sock_wr, &sock);
+    return 0;
+}
+
+static void conn_close(void)
+{
+    if (tls) {                                    /* no close_notify: the socket goes too */
+        free(tls_buf);
+        tls_buf = 0;
+        tls = 0;
+    }
+    if (sock >= 0)
+        closesocket(sock);
+    sock = -1;
+}
+static int conn_read(void *b, unsigned n)         /* > 0 bytes, 0 the end, < 0 an error or a timeout */
+{
+    if (!tls)
+        return recv(sock, b, n, 0);
+    {
+        int r = br_sslio_read(&tls->io, b, n);
+        if (r < 0) {
+            int err = br_ssl_engine_last_error(&tls->cc.eng);
+            if (err && err != BR_ERR_IO)
+                snprintf(radio_net_why, sizeof radio_net_why, "tls error %d", err);
+            return err == 0 ? 0 : -1;
+        }
+        return r;
+    }
+}
+static int conn_write(const void *b, unsigned n)
+{
+    if (!tls)
+        return send(sock, b, n, 0) == (int)n ? 0 : -1;
+    if (br_sslio_write_all(&tls->io, b, n) < 0 || br_sslio_flush(&tls->io) < 0) {
+        snprintf(radio_net_why, sizeof radio_net_why, "tls error %d", br_ssl_engine_last_error(&tls->cc.eng));
+        return -1;
+    }
+    return 0;
+}
+
+/* "http[s]://host[:port]/path" */
+static int split(const char *u, char *host, unsigned hmax, int *port, const char **path, int *secure)
 {
     unsigned n = 0;
-    if (strncmp(u, "http://", 7))
-        return -1;                                /* https needs TLS: not here */
-    u += 7;
+    *secure = !strncmp(u, "https://", 8);
+    if (strncmp(u, "http://", 7) && !*secure)
+        return -1;
+    u += *secure ? 8 : 7;
     while (*u && *u != '/' && *u != ':' && n + 1u < hmax)
         host[n++] = *u++;
     host[n] = 0;
-    *port = 80;
+    *port = *secure ? 443 : 80;
     if (*u == ':') {
         *port = 0;
         for (u++; *u >= '0' && *u <= '9'; u++)
@@ -64,15 +209,15 @@ static int ieq_prefix(const char *a, const char *p)    /* a starts with p, ignor
 }
 
 /* one request; 0 = streaming (headers read), 1 = redirected (url replaced), < 0 = failed */
-static int open_stream(int *sock)
+static int open_stream(void)
 {
     char host[64], req[640], line[URL_MAX];
     const char *path;
-    int port, s, n = 0, status = 0;
+    int port, s, n = 0, status = 0, secure;
     struct hostent *he;
     struct sockaddr_in a;
-    if (split(url, host, sizeof host, &port, &path)) {
-        why("not an http:// url");
+    if (split(url, host, sizeof host, &port, &path, &secure)) {
+        why("not an http(s):// url");
         return -1;
     }
     he = gethostbyname(host);
@@ -119,22 +264,34 @@ static int open_stream(int *sock)
         int ms = 5000;
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &ms, sizeof ms);
     }
-    n = snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: FM-1 Net/0.1\r\nIcy-MetaData: 0\r\n"
-                 "Accept: */*\r\nConnection: close\r\n\r\n", path, host);
-    if (send(s, req, n, 0) != n) {
-        closesocket(s);
-        why("send failed");
+    sock = s;
+    if (secure && tls_open(s, host)) {
+        conn_close();
+        why("tls: no memory");
         return -1;
     }
+    n = snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: FM-1 Net/0.1\r\nIcy-MetaData: 0\r\n"
+                 "Accept: */*\r\nConnection: close\r\n\r\n", path, host);
+    if (conn_write(req, (unsigned)n)) {           /* for https, the handshake happens here */
+        conn_close();
+        if (!radio_net_why[0] || !secure)
+            why("send failed");
+        shim_log(radio_net_why);
+        return -1;
+    }
+    if (secure)
+        shim_log("tls up");
     /* the headers, a line at a time */
     radio_net_name[0] = 0;
     for (;;) {
         unsigned k = 0;
         char c = 0;
         while (k + 1u < sizeof line) {
-            if (recv(s, &c, 1, 0) != 1) {
-                closesocket(s);
-                why("closed in headers");
+            if (conn_read(&c, 1) != 1) {
+                conn_close();
+                if (!radio_net_why[0])
+                    why("closed in headers");
+                shim_log(radio_net_why);
                 return -1;
             }
             if (c == '\n')
@@ -143,7 +300,7 @@ static int open_stream(int *sock)
                 line[k++] = c;
         }
         if (c != '\n')                           /* too long: the rest of the line goes */
-            while (recv(s, &c, 1, 0) == 1 && c != '\n')
+            while (conn_read(&c, 1) == 1 && c != '\n')
                 ;
         line[k] = 0;
         if (!status) {                            /* "HTTP/1.x 200 OK" or "ICY 200 OK" */
@@ -175,28 +332,27 @@ static int open_stream(int *sock)
         }
     }
     if (status >= 300 && status < 400) {
-        closesocket(s);
+        conn_close();
         shim_log("redirect");
         return 1;
     }
     if (status != 200) {
-        closesocket(s);
+        conn_close();
         snprintf(radio_net_why, sizeof radio_net_why, "http status %d", status);
         shim_log(radio_net_why);
         return -1;
     }
-    *sock = s;
     return 0;
 }
 
 static void radio_task(void *arg)
 {
-    int s = -1, tries, rc = -1;
+    int tries, rc = -1;
     (void)arg;
     running = 1;
     radio_net_state = RN_CONNECTING;
     for (tries = 0; tries < 4 && !stop_req; tries++) {
-        rc = open_stream(&s);
+        rc = open_stream();
         if (rc != 1)
             break;
     }
@@ -218,15 +374,18 @@ static void radio_task(void *arg)
             n = room;
         if (n > 2920u)
             n = 2920u;
-        got = recv(s, ring + at, n, 0);
+        got = conn_read(ring + at, n);
         if (got <= 0) {
-            why(got == 0 ? "stream ended" : "stream stalled");
+            if (got == 0 || !tls)
+                why(got == 0 ? "stream ended" : "stream stalled");
+            else if (!radio_net_why[0])
+                why("stream stalled");
             radio_net_state = got == 0 ? RN_ENDED : RN_ERROR;
             break;
         }
         radio_wr += (uint32_t)got;
     }
-    closesocket(s);
+    conn_close();
     if (stop_req)
         radio_net_state = RN_IDLE;
     running = 0;

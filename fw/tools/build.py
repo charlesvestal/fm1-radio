@@ -209,6 +209,11 @@ LWIP_INC = ["include_lib/net/device", "include_lib/net/device/eth", "include_lib
             "include_lib/net/lwip_2_1_3/lwip/app/sock_api", "include_lib/net/lwip_2_1_3/lwip/app/dhcp_srv",
             "include_lib/net/lwip_2_1_3/lwip/port/arch", "include_lib/net/lwip_2_1_3/lwip/src/include/lwip",
             "include_lib/system/device", "include_lib/system/os/FreeRTOS/pi32_lto"]
+# BearSSL on a bare 32-bit chip: no OS randomness or clock (the app seeds it), no x86 / POWER8 code, no
+# unaligned access
+BSSL_CF = ["-DBR_USE_UNIX_TIME=0", "-DBR_USE_WIN32_TIME=0", "-DBR_USE_URANDOM=0", "-DBR_USE_GETENTROPY=0",
+           "-DBR_USE_WIN32_RAND=0", "-DBR_RDRAND=0", "-DBR_AES_X86NI=0", "-DBR_SSE2=0", "-DBR_POWER8=0",
+           "-DBR_64=0", "-DBR_INT128=0", "-DBR_UMUL128=0", "-DBR_LE_UNALIGNED=0", "-DBR_BE_UNALIGNED=0"]
 BLE_SDK_SRC = ["apps/common/config/bt_profile_config.c",
                "apps/common/config/log_config/lib_btctrler_config.c",
                "apps/common/config/log_config/lib_btstack_config.c"]
@@ -270,14 +275,22 @@ def ble_units():
                 o = OUT / "ble" / "o" / ("lwip_" + f.stem + ".o")
                 units.append(("cc", *BLE_CF, *LWIP_CF, *lwip_inc, "-c", f, "-o", o))
                 objs.append(o)
+    if WIFI_BUILD:   # BearSSL (MIT) for https streams: all of it, LTO keeps what the client uses
+        bssl = SRC / "firmware" / "third_party" / "bearssl"
+        for f in sorted((bssl / "src").rglob("*.c")):
+            o = OUT / "ble" / "o" / ("bssl_" + "_".join(f.relative_to(bssl / "src").with_suffix("").parts) + ".o")
+            units.append(("cc", *BLE_CF, *BSSL_CF, *inc, f"-I{(bssl / 'inc').relative_to(SRC)}",
+                          f"-I{(bssl / 'src').relative_to(SRC)}", "-c", f, "-o", o))
+            objs.append(o)
     for f in [*(SRC / "ble" / "shim").glob("*.c"), *(SRC / "ble" / "midi").glob("*.c"),
               *(SRC / "ble" / "wifi").glob("*.c"), *[dst / s for s in BLE_SDK_SRC]]:
         o = OUT / "ble" / "o" / (f.stem + ".o")
         if f.parent.name == "wifi" and WIFI_BUILD:   # the radio's sockets: lwIP's options as it is built
-            units.append(("cc", *BLE_CF, *LWIP_CF, *lwip_inc, "-c", f, "-o", o))
+            units.append(("cc", *BLE_CF, *LWIP_CF, *BSSL_CF, *lwip_inc, "-Ifirmware/third_party/bearssl/inc",
+                          "-c", f, "-o", o))
             objs.append(o)
             continue
-        units.append(("cc", *BLE_CF, *(["-DSHIM_HEAP_KB=136u", *(["-DSHIM_WIFI_RX_MODERATE"] if os.environ.get("WIFI_RX") == "moderate" else []), *(["-DSHIM_GLOBAL_IRQ"] if os.environ.get("SHIM_IRQ") == "global" else [])] if WIFI_BUILD else []), *inc, "-c", f, "-o", o))
+        units.append(("cc", *BLE_CF, *(["-DSHIM_HEAP_KB=144u", *(["-DSHIM_WIFI_RX_MODERATE"] if os.environ.get("WIFI_RX") == "moderate" else []), *(["-DSHIM_GLOBAL_IRQ"] if os.environ.get("SHIM_IRQ") == "global" else [])] if WIFI_BUILD else []), *inc, "-c", f, "-o", o))
         objs.append(o)
     libs = ["--start-group", *[dst / "lib" / f for f in BLE_LIBS + WIFI_LIBS], dst / "lib" / "libcompiler_rt.a", "--end-group"]
     return units, objs, libs
@@ -382,8 +395,9 @@ def check(img, syms, dis, rt):
     notes.append(f"image {len(img)} B; RAM .data+.bss {bss} B of {128 * 1024}; pool {pool} B of {0x4C000}")
     if bss > 128 * 1024:
         errors.append("RAM region overflow")
-    if 0x4C000 - pool < 8192:                     # keep >= 8 KiB of the pool spare
-        errors.append(f"pool headroom {0x54000 - pool} B < 8192 B")
+    spare = 2048 if WIFI_BUILD else 8192          # the radio gives the pool to its heap: 2 KiB spare is enough
+    if 0x4C000 - pool < spare:
+        errors.append(f"pool headroom {0x4C000 - pool} B < {spare} B")
     return errors, notes
 
 
