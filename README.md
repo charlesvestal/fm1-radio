@@ -105,7 +105,8 @@ key deletes.
 The screen shows a small keyboard with what each key types.
 
 The FM-1 keeps six networks, newest first. With networks saved, it turns WiFi on at start and joins
-the first one it finds. To forget one, use `python3 tools/wifi_ctl.py nets` and then `del N`.
+the first one it finds. To forget one, press **Forget** next to it on `wifi.html`, or use
+`python3 tools/wifi_ctl.py nets` and then `del N`.
 
 ### Listening
 
