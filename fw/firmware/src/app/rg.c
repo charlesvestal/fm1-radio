@@ -1,194 +1,99 @@
-/* Radio Garden's stations, as tools/rg_sync.py writes them, kept in the data flash: the table from RG_TABLE,
- * a commit record at RG_HEAD written last (a torn upload leaves no table). Read in place through the plain
- * XIP window (fl_plain_window_init). Table format (little-endian), see rg_sync.py:
- *   header 64 B: magic "RGT1", version, n_continents/countries/cities/stations, the offsets, total_len,
- *   CRC-32 of [64, total_len); then continents / countries / cities {name, first child, n children} and
- *   stations {name, url}, 8 bytes each; then NUL-terminated ASCII strings.
- * Upload over the wire (F0 7D 57 ...): 0x50 len:5 begin, 0x51 off:3 data (8-to-7 packed) -> 0x10 "rg next",
- * 0x52 crc:5 end, 0x53 info. Part of the unity build (main_wifi.c). */
-#define RG_HEAD 0x97000u
-#define RG_TABLE 0x98000u
-#define RG_MAX 0x44000u                           /* to 0xDC000: OBJ_PANEL's sectors follow */
-#define RG_MAGIC 0x31544752u                      /* "RGT1" */
-#define RG_COMMIT 0x4B4F4752u                     /* "RGOK" */
+/* Radio Garden's places, as tools/rg_places.py packs them into the image (build/gen/rg_places_data.h, made by
+ * the build), read in place. The place names, compressed a country at a time, are unpacked as they are
+ * needed (inflate.c). Layout (little-endian), see rg_places.py:
+ *   header 64 B: magic "RGP1", version, continents, countries, places, the offsets, total, CRC-32 of
+ *   [64, total), created; continents {name, first country, countries} 8 B; countries {name, block offset,
+ *   block length, places, continent} 16 B; NUL-terminated ASCII strings; the blocks: a country's names,
+ *   sorted, front coded (shared length, the rest, NUL), raw deflate in a 1 KB window.
+ * Part of the unity build (main_wifi.c). */
+#include "rg_places_data.h"
+#define RG_MAGIC 0x31504752u                      /* "RGP1" */
 
 typedef struct {
     uint32_t magic;
-    uint16_t version, n_cont, n_country, n_city, n_station, rsv;
-    uint32_t off_cont, off_country, off_city, off_station, off_str, total, crc, created, pad[4];
+    uint16_t version, n_cont, n_country, n_place;
+    uint32_t off_cont, off_country, off_str, off_blocks, total, crc, created, pad[6];
 } rg_hdr_t;
-typedef struct { uint32_t name; uint16_t first, n; } rg_node_t;
-typedef struct { uint32_t name, url; } rg_station_t;
-typedef struct { uint32_t magic, len, crc, rsv; } rg_commit_t;
+typedef char rg_hdr_is_64[sizeof(rg_hdr_t) == 64u ? 1 : -1];
+typedef struct { uint32_t name; uint16_t first, n; } rg_cont_t;
+typedef struct { uint32_t name, block, len; uint16_t n; uint8_t cont, rsv; } rg_country_t;
 
 static const rg_hdr_t *rg;                        /* the table, or 0 */
 
-static const void *rg_xip(uint32_t off) { return (const void *)fm1_xip_ptr(off); }
-
-/* the CRC of flash [off, off+n), read straight from the chip: a long stream through the XIP cache (with WiFi
- * busy) has fetched bad code (a jump to 0x470) */
-static uint32_t rg_crc_flash(uint32_t off, uint32_t n)   /* zlib CRC-32 (Mocky's nibble table) */
-{
-    static const uint32_t T[16] = {
-        0x00000000u, 0x1DB71064u, 0x3B6E20C8u, 0x26D930ACu, 0x76DC4190u, 0x6B6B51F4u, 0x4DB26158u, 0x5005713Cu,
-        0xEDB88320u, 0xF00F9344u, 0xD6D6A3E8u, 0xCB61B38Cu, 0x9B64C2B0u, 0x86D3D2D4u, 0xA00AE278u, 0xBDBDF21Cu};
-    uint8_t b[256];
-    uint32_t c = 0xFFFFFFFFu;
-    while (n) {
-        uint32_t k = n > sizeof b ? (uint32_t)sizeof b : n, i;
-        if (fl_read(off, b, k))
-            return 0;
-        for (i = 0; i < k; i++) {
-            c ^= b[i];
-            c = (c >> 4) ^ T[c & 15u];
-            c = (c >> 4) ^ T[c & 15u];
-        }
-        off += k;
-        n -= k;
-        SHIM_WDT_FEED();
-    }
-    return ~c;
-}
-
 static void rg_open(void)
 {
-    const rg_commit_t *c = rg_xip(RG_HEAD);
-    const rg_hdr_t *h = rg_xip(RG_TABLE);
-    rg = 0;
-    if (c->magic != RG_COMMIT || h->magic != RG_MAGIC || h->total != c->len || c->len > RG_MAX ||
-        c->len < sizeof *h || h->crc != c->crc)
-        return;
-    if (rg_crc_flash(RG_TABLE + (uint32_t)sizeof *h, h->total - (uint32_t)sizeof *h) != h->crc)
-        return;
-    rg = h;
+    const rg_hdr_t *h = (const rg_hdr_t *)RG_PLACES;
+    rg = h->magic == RG_MAGIC && h->total == sizeof RG_PLACES ? h : 0;
 }
 
-static const char *rg_str(uint32_t off) { return (const char *)rg + off; }
-static const rg_node_t *rg_cont(uint32_t i) { return (const rg_node_t *)((const uint8_t *)rg + rg->off_cont) + i; }
-static const rg_node_t *rg_country(uint32_t i) { return (const rg_node_t *)((const uint8_t *)rg + rg->off_country) + i; }
-static const rg_node_t *rg_city(uint32_t i) { return (const rg_node_t *)((const uint8_t *)rg + rg->off_city) + i; }
-static const rg_station_t *rg_station(uint32_t i)
+static const char *rg_str(uint32_t off) { return (const char *)rg + rg->off_str + off; }
+static const rg_cont_t *rg_cont(uint32_t i) { return (const rg_cont_t *)((const uint8_t *)rg + rg->off_cont) + i; }
+static const rg_country_t *rg_country(uint32_t i)
 {
-    return (const rg_station_t *)((const uint8_t *)rg + rg->off_station) + i;
+    return (const rg_country_t *)((const uint8_t *)rg + rg->off_country) + i;
 }
 
-/* ---- the upload (the main loop's: flash writes stop the code fetches, so not from inside a task's wait) */
-static struct {
-    uint32_t len, got, erased, on;                /* erased: table bytes erased so far (whole sectors) */
-    uint32_t chunk_off, chunk_len;                /* a decoded chunk waiting for the main loop */
-    uint8_t chunk[600];
-} rgu OM_POOL;
-
-static uint32_t rg_get7(const uint8_t *p, uint32_t k)
+/* a country's place names [first, first + n): name(i, ctx, k) for each, in order; front decoding as they are
+ * unpacked, stopping after the last one wanted */
+typedef struct {
+    uint32_t idx, first, last;                    /* the place being decoded; the range wanted */
+    char cur[32];
+    uint8_t k, have_k;
+    void (*name)(uint32_t i, const char *s, void *ctx);
+    void *ctx;
+} rg_names_t;
+static int rg_names_byte(void *p, uint8_t c)
 {
-    uint32_t v = 0, i;
-    for (i = 0; i < k; i++)
-        v |= (uint32_t)(p[i] & 0x7Fu) << (7u * i);
-    return v;
+    rg_names_t *r = p;
+    if (!r->have_k) {                             /* how many characters it shares with the last name */
+        r->k = c < sizeof r->cur ? c : (uint8_t)(sizeof r->cur - 1u);
+        r->have_k = 1;
+        return 0;
+    }
+    if (c) {
+        if (r->k + 1u < sizeof r->cur)
+            r->cur[r->k++] = (char)c;
+        return 0;
+    }
+    r->cur[r->k] = 0;
+    r->have_k = 0;
+    if (r->idx >= r->first)
+        r->name(r->idx, r->cur, r->ctx);
+    return ++r->idx > r->last;
 }
-
-/* wire_service: a 0x51 frame's data (after off:3), unpacked into rgu.chunk; 0 = taken */
-static int rg_take_chunk(const uint8_t *p, uint32_t n)
+static int rg_names(uint32_t country, uint32_t first, uint32_t n, void (*name)(uint32_t, const char *, void *),
+                    void *ctx)
 {
-    uint32_t off, o = 0, i;
-    if (!rgu.on || n < 3u || rgu.chunk_len)
+    const rg_country_t *c;
+    rg_names_t r;
+    if (!rg || country >= rg->n_country || !n)
         return -1;
-    off = rg_get7(p, 3);
-    p += 3;
-    n -= 3u;
-    while (n) {                                   /* 8 wire bytes carry 7: a high-bit byte, then 7 */
-        uint32_t m = *p++, k = n - 1u < 7u ? n - 1u : 7u;
-        for (i = 0; i < k && o < sizeof rgu.chunk; i++)
-            rgu.chunk[o++] = (uint8_t)(p[i] | (((m >> i) & 1u) << 7));
-        p += k;
-        n -= k + 1u;
-    }
-    rgu.chunk_off = off;
-    rgu.chunk_len = o;
-    return 0;
+    c = rg_country(country);
+    memset(&r, 0, sizeof r);
+    r.first = first;
+    r.last = first + n - 1u;
+    r.name = name;
+    r.ctx = ctx;
+    return inflate_mem(RG_PLACES + c->block, c->len, rg_names_byte, &r);
 }
-
-static void rg_reply(const char *what, uint32_t v)
+static void rg_name_one(uint32_t i, const char *s, void *ctx) { (void)i; w_cpy(ctx, s, 32); }
+static int rg_place_name(uint32_t country, uint32_t i, char out[32])   /* one place's name */
 {
-    char b[32];
-    snprintf(b, sizeof b, "rg %s %u", what, v);
-    wire_line(b);
+    out[0] = 0;
+    return rg_names(country, i, 1, rg_name_one, out) || !out[0] ? -1 : 0;
 }
-
-static void rg_begin(uint32_t len)
+typedef struct { const char *want; uint32_t found; } rg_find_t;
+static void rg_find_name(uint32_t i, const char *s, void *ctx)
 {
-    uint32_t took;
-    if (!len || len > RG_MAX || !flash_ok) {
-        rg_reply("error", 1);
-        return;
-    }
-    if (radio_st != RS_OFF)
-        radio_stop();
-    rg = 0;
-    if (fl_erase4k(RG_HEAD, &took)) {             /* no commit record: no table until the end */
-        rg_reply("error", 2);
-        return;
-    }
-    rgu.len = len;
-    rgu.got = rgu.erased = rgu.chunk_len = 0;
-    rgu.on = 1;
-    rg_reply("next", 0);
+    rg_find_t *f = ctx;
+    if (f->found == 0xFFFFFFFFu && w_eq(s, f->want))
+        f->found = i;
 }
-
-/* the main loop: write a chunk that arrived (in order; a resend of an earlier one is answered, not written) */
-static void rg_service(void)
+static int32_t rg_place_index(uint32_t country, const char *name)   /* a place by its name, or -1 */
 {
-    uint32_t off = rgu.chunk_off, n = rgu.chunk_len, took;
-    if (!n)
-        return;
-    rgu.chunk_len = 0;
-    if (off != rgu.got || off + n > rgu.len) {
-        rg_reply("next", rgu.got);
-        return;
-    }
-    while (rgu.erased < off + n) {
-        if (fl_erase4k(RG_TABLE + rgu.erased, &took)) {
-            rg_reply("error", 3);
-            rgu.on = 0;
-            return;
-        }
-        rgu.erased += 0x1000u;
-    }
-    if (fl_write(RG_TABLE + off, rgu.chunk, n)) {
-        rg_reply("error", 4);
-        rgu.on = 0;
-        return;
-    }
-    rgu.got += n;
-    rg_reply("next", rgu.got);
-}
-
-static void rg_end(uint32_t crc)
-{
-    rg_commit_t c;
-    const rg_hdr_t *h = rg_xip(RG_TABLE);
-    uint32_t i;
-    if (!rgu.on || rgu.got != rgu.len) {
-        rg_reply("error", 5);
-        return;
-    }
-    rgu.on = 0;
-    fl_inval(RG_TABLE, rgu.len);
-    if (rg_crc_flash(RG_TABLE, rgu.len) != crc || h->magic != RG_MAGIC || h->total != rgu.len) {
-        rg_reply("error", 6);
-        return;
-    }
-    c.magic = RG_COMMIT;
-    c.len = rgu.len;
-    c.crc = h->crc;
-    c.rsv = 0;
-    for (i = 0; i < sizeof c; i++)
-        rgu.chunk[i] = ((const uint8_t *)&c)[i];  /* the driver wants a RAM source */
-    if (fl_write(RG_HEAD, rgu.chunk, sizeof c)) {
-        rg_reply("error", 7);
-        return;
-    }
-    fl_inval(RG_HEAD, 0x1000u);
-    rg_open();
-    rg_reply(rg ? "ok" : "error", rg ? rg->n_station : 8u);
+    rg_find_t f = {name, 0xFFFFFFFFu};
+    if (!rg || country >= rg->n_country)
+        return -1;
+    rg_names(country, 0, rg_country(country)->n, rg_find_name, &f);
+    return f.found == 0xFFFFFFFFu ? -1 : (int32_t)f.found;
 }

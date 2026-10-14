@@ -553,6 +553,7 @@ static void tempo_tap(void)
     }
     (void)k;
 }
+#include "app/inflate.c"
 #include "app/rg.c"
 
 static void wire_service(void)
@@ -563,13 +564,6 @@ static void wire_service(void)
     if (!ota_frame_get(&p, &n) || n < 3u || p[0] != 0x7D || p[1] != 0x57)
         return;
     cmd = p[2];
-    if (cmd == 0x51) {                            /* the station table's next chunk (rg.c) */
-        int taken = rg_take_chunk(p + 3, n - 3u);
-        ota_frame_done();
-        if (taken)
-            rg_reply("next", rgu.got);            /* busy or not begun: the host resends from here */
-        return;
-    }
     if (cmd == 0x43) {                            /* the stream's url, as nibbles */
         uint32_t k = 0;
         for (i = 3; i + 1u < n && k + 1u < sizeof radio_url_buf; i += 2)
@@ -940,20 +934,18 @@ static void fm1_main(void)
      * fetched from the flash comes back corrupted now and then (jumps to 0x70 / 0x470): measured on a stream, 1.40 V
      * crashes within seconds to minutes, 1.45 V within minutes, 1.50 V ran 16 minutes clean */
     fm1_p33_write(6, (uint8_t)((fm1_p33_read(6) & ~7u) | 5u));
-    fl_plain_window_init();                       /* the data flash reads in the clear (the station table) */
     rg_open();
     fx_reset();
     ble_boot_note();
     nets_load();
-    if (rg) {                                     /* the station of the last session, playing if it was */
-        sel_from_station(nets.last);
-        tuned_station = 0xFFFFu;
-        tune_want = 1;
-        tune_at = 0;
-        radio_want = nets.playing;
-    }
-    if (nets_count())                             /* a radio: WiFi on by itself when it knows a network */
+    radio_ui_restore();                           /* the place and station of the last session, playing if it was */
+    if (nets_count()) {                           /* a radio: WiFi on by itself when it knows a network */
         wifi_power(1);
+    } else {                                      /* the first start: straight to the networks around */
+        ui_page = PG_NETS;
+        ui_scan();
+        snprintf(ui_msg, sizeof ui_msg, "Pick your WiFi: SELECT, then PLAY");
+    }
     shim_idle_hook = wire_service;
     ui_dirty = 1;
 
@@ -1054,13 +1046,11 @@ static void fm1_main(void)
         case 0x46:                                /* as a knob: level 0..3 (K1..K4), a signed step */
             sel_turn(wire_arg & 3u, (int8_t)(wire_arg2 & 0x40u ? wire_arg2 | 0x80u : wire_arg2));
             break;
-        case 0x50: rg_begin(rg_get7(wire_buf, 5)); break;
-        case 0x52: rg_end(rg_get7(wire_buf, 5)); break;
         case 0x53:
             if (rg) {
                 char lb[64];
-                snprintf(lb, sizeof lb, "rg table %u continents %u countries %u cities %u stations",
-                         rg->n_cont, rg->n_country, rg->n_city, rg->n_station);
+                snprintf(lb, sizeof lb, "rg places: %u continents %u countries %u places",
+                         rg->n_cont, rg->n_country, rg->n_place);
                 wire_line(lb);
             } else {
                 wire_line("rg none");
@@ -1236,7 +1226,6 @@ static void fm1_main(void)
             if (radio_st != RS_OFF)
                 radio_stop();                     /* radio_ui_service starts it again (the station is unchanged) */
         }
-        rg_service();
         radio_ui_service();
         wifi_poll();
         if (wifi_st != WS_CONNECTED && radio_mode != 2 && radio_st != RS_OFF && radio_st != RS_ERROR)

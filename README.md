@@ -63,28 +63,24 @@ To go back to M-VAVE's firmware, use the web installer on
 [FoMni's site](https://charlesvestal.github.io/fm1-fomni/install/). An FM-1 that fails to start twice
 starts in a safe mode with USB on, and holding OCT− and OCT+ for 5 seconds starts update mode.
 
-### The stations
+### The places
 
-The firmware holds the stations in its data flash, but they don't come with it: they are Radio Garden's,
-so you build the list on your own computer and send it over USB.
+The build packs Radio Garden's list of places into the firmware: 12,844 places in 227 countries, names
+only, compressed a country at a time (78 KB). It fetches the list once, the first time you build, and
+keeps it in `fw/build/rg/places.json`; `python3 tools/rg_places.py --refresh` fetches it again. The
+places are Radio Garden's, so they're never committed here.
 
-```sh
-cd fw
-python3 tools/rg_sync.py                               # about 30 minutes the first time
-python3 tools/wifi_ctl.py rgload build/rg/stations.bin # about 30 seconds
-```
-
-`rg_sync.py` asks Radio Garden for each city's stations, follows each to its real stream and keeps
-the ones the FM-1 can play: plain `http://` MP3 streams (no AAC or HLS). HTTPS streams it keeps
-only where there's room (see HTTPS and certificates). It keeps up to six
-stations a city, about 3,600 in all. Everything it fetches is cached in `build/rg/`, so a second
-run takes a second. `--refresh` asks again.
+The stations aren't in the firmware. When you choose a place, the FM-1 asks Radio Garden for its stations,
+and plays a station through Radio Garden's link to its stream.
 
 ## Using it
 
 ### First start: join a network
 
 The FM-1 joins 2.4 GHz networks only, open or WPA2 with a password. It can't see 5 GHz networks.
+
+With no network saved, the FM-1 starts on the list of networks around it, already scanning: turn
+**SELECT** to yours and press **PLAY**, then type its password (steps 4 and 5 below).
 
 The easiest way to add a network is from the browser: open [`fw/web/wifi.html`](fw/web/wifi.html) in
 Chrome or Edge with the FM-1 plugged in, press **Connect to the FM-1**, type the network's name and
@@ -118,17 +114,22 @@ the first one it finds. To forget one, press **Forget** next to it on `wifi.html
 | **PLAY** | Play or stop. |
 | **KNOB 1** | Continent. |
 | **KNOB 2** | Country. |
-| **KNOB 3** | City. |
-| **KNOB 4** or **SELECT** | Station in the city. |
+| **KNOB 3** | Place: a city or town, A to Z. |
+| **KNOB 4** or **SELECT** | Station in the place. |
 | **MASTER** | Volume. |
 | **FX** | Tap tempo for the effects. |
-| **SEL** | Browse the list of continents, countries, cities and stations. |
+| **SEL** | Browse the list of continents, countries, places and stations. |
 | **GLO** | The WiFi page, and back. |
 | Hold **HOME** | The controls, on the screen. |
 
-The knobs work as a dial: turn them, and the radio tunes once you stop. The screen shows the station,
-its city and country, and whether it is playing or buffering. A station that drops out is reconnected
-by itself.
+The knobs work as a dial: turn them, and the radio tunes once you stop. A new place takes a second or
+two: the FM-1 asks Radio Garden for its stations (up to 100, as Radio Garden orders them) and plays the
+first. The screen shows the station, its place and country, and whether it is playing or buffering. A
+station that drops out is reconnected by itself.
+
+Some stations can't play. About a third of Radio Garden's stations send AAC, which the FM-1 can't decode,
+and some are offline. The screen says so ("can't play AAC", "station offline"): turn **KNOB 4** to the
+next one.
 
 ![The controls, shown while HOME is held](docs/img/help.png)
 
@@ -192,12 +193,13 @@ quarter second, so below about 108 BPM the 1/8 stutter plays a 1/16 instead.
 `fw/tools/screenshot.py OUT.png [home|browse|wifi|help]` saves the screen as a PNG: the FM-1 redraws
 the page and sends it over USB as it draws, which pauses the audio for about a second. The pictures
 here were taken that way.
-| `rgload FILE`, `rginfo` | Send the station table; show the one the FM-1 holds. |
+| `rginfo` | The places built into the firmware. |
 | `reboot` | Restart. |
 
 ## HTTPS and certificates
 
-The FM-1 plays `https://` MP3 streams as well as plain `http://` ones, with
+The FM-1 plays `https://` MP3 streams as well as plain `http://` ones, and asks Radio Garden (HTTPS
+only) for each place's stations, with
 [BearSSL](https://www.bearssl.org)'s TLS client:
 
 - TLS 1.2;
@@ -209,18 +211,16 @@ That covers what streaming servers offer.
 
 **It does not check certificates.** The FM-1 has no root certificates and no clock, so it uses the
 server's key as sent and doesn't verify who signed it. The connection is encrypted, but someone on
-your network who wanted to could pose as the station and send you other audio. For a radio this is a
-small risk. Checking certificates is possible now that BLE's flash is free: BearSSL's checker, a
-set of the root certificates radio servers use, and the date from network time would take about
-35–45 KB.
-
-The station table doesn't hold HTTPS stations yet: at six stations a city, the table's flash is
-already full, and HTTPS stations will only be added on top of the plain ones. You can play an HTTPS
-stream by hand with `wifi_ctl.py url` (see below).
+your network who wanted to could pose as the station or as Radio Garden, and send you other audio or
+another list. For a radio this is a small risk. Checking certificates would take BearSSL's checker, a
+set of root certificates and the date from network time, about 35–45 KB of flash, more than the 22 KB
+now free.
 
 ## Known limits
 
-- 2.4 GHz WiFi only. MP3 streams only: no AAC or HLS.
+- 2.4 GHz WiFi only. MP3 streams only: no AAC or HLS, about a third of Radio Garden's stations. An AAC
+  decoder would need more flash and RAM than are left.
+- A place shows up to 100 stations.
 - Server certificates aren't checked (see above).
 - The core voltage is raised to 1.50 V at start (the SDK uses 1.45 V at this clock). At 1.40 V, flash
   reads failed under WiFi load and the FM-1 crashed.
@@ -236,7 +236,7 @@ a synth with no radio, is about 158 KB in all for comparison.
 
 ### Flash: the 581 KB app slot
 
-The image is 476 KB, which leaves about 105 KB free.
+The image is 560 KB, which leaves about 22 KB free.
 
 | Part | Size |
 |---|---|
@@ -246,7 +246,8 @@ The image is 476 KB, which leaves about 105 KB free.
 | JieLi's RF layer and crypto, the shim and its WiFi glue | 25 KB |
 | **WiFi in all** | **about 299 KB** |
 | HTTPS: BearSSL's code (22 KB), its tables and the TLS glue | 36 KB |
-| The radio, minimp3, UI, fonts and platform | about 99 KB |
+| Radio Garden's places (12,844 names, compressed by country) | 78 KB |
+| The radio, minimp3, UI, fonts, platform, the Radio Garden client and its decompressor | about 105 KB |
 
 ### RAM: 128 KB of static data
 
@@ -293,8 +294,9 @@ about 138 of 144 KB on HTTPS, leaving about 9 KB of slack.
 - **WiFi is the bulk of the firmware:** about 300 KB of flash and, with its task stacks and heap, about
   three quarters of the RAM. Getting there took the SDK's `_sfc` WiFi libraries (smaller buffers
   than the default ones), a narrower screen buffer and a heap that takes nearly all of the pool.
-- **Flash has room:** about 105 KB, since BLE came out. That's room for certificate checking, more
-  effects or other features.
+- **Flash is nearly full again:** about 22 KB, after BLE came out and the places went in. The data
+  flash area the old station table used (272 KB at 0x98000) is free, so the places could move there if
+  the code needs room.
 - **RAM has little:** new buffers need room found first. The candidates are fewer task stacks (most
   tasks use under 4 KB of their 8) and a smaller stream buffer on HTTPS streams.
 

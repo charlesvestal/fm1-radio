@@ -73,7 +73,18 @@ int init_net_device_mac_addr(char *macaddr, char ap_mode)
 /* ---- saved networks (OBJ_WIFI), most recent first */
 #define NET_N 6
 typedef struct { char ssid[33], pass[64]; } net_t;
-static struct { uint32_t magic; net_t n[NET_N]; uint16_t last; uint8_t playing, rsv; } nets;   /* + the radio's station */
+/* + the radio's station: the place (a country and a name: the table may change under an index) and Radio
+ * Garden's station id, with its name for the screen before the place's list is fetched again */
+static struct {
+    uint32_t magic;
+    net_t n[NET_N];
+    uint16_t last;                                /* (the old table's station index, unused) */
+    uint8_t playing, rsv;
+    uint16_t country, rsv2;
+    char place[32], st_id[12], st_title[32];
+} nets;
+/* the struct before the places (its size, padding included): the networks load, the station starts empty */
+#define NETS_OLD_SIZE ((__builtin_offsetof(__typeof__(nets), country) + 3u) & ~3u)
 #define NETS_MAGIC 0x57494631u                    /* "WIF1" */
 
 static int w_eq(const char *a, const char *b)
@@ -91,10 +102,16 @@ static void w_cpy(char *d, const char *s, unsigned max)
 }
 static void nets_load(void)
 {
-    if (plat_store_load(OBJ_WIFI, &nets, sizeof nets) != (int)sizeof nets || nets.magic != NETS_MAGIC) {
+    int n;
+    memset(&nets, 0, sizeof nets);
+    n = plat_store_load(OBJ_WIFI, &nets, sizeof nets);
+    if ((n != (int)sizeof nets && n != (int)NETS_OLD_SIZE) || nets.magic != NETS_MAGIC) {
         memset(&nets, 0, sizeof nets);
         nets.magic = NETS_MAGIC;
     }
+    if (n == (int)NETS_OLD_SIZE)                  /* the networks kept; the station starts empty */
+        memset((uint8_t *)&nets + __builtin_offsetof(__typeof__(nets), country), 0,
+               sizeof nets - __builtin_offsetof(__typeof__(nets), country));
 }
 static void nets_save(void) { plat_store_save(OBJ_WIFI, &nets, sizeof nets); }
 static int nets_count(void)

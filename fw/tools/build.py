@@ -122,8 +122,16 @@ def tc_all(*cmds):
 
 
 def generate():
-    """generated headers: the font (Felucca's)"""
+    """generated headers: the font (Felucca's); for the radio, Radio Garden's places (rg_places.py: fetched
+    once into build/rg/places.json, packed into the image)"""
     GEN.mkdir(parents=True, exist_ok=True)
+    if WIFI_BUILD:
+        r = subprocess.run([sys.executable, str(SRC / "tools" / "rg_places.py"), "--c-out",
+                            str(GEN / "rg_places_data.h")], capture_output=True, text=True)
+        sys.stdout.write(r.stdout)
+        if r.returncode:
+            sys.stderr.write(r.stderr)
+            raise SystemExit("build: rg_places.py failed (it needs the network once, to fetch the places)")
     if (GEN / "felucca_font.h").exists():
         return
     r = subprocess.run([sys.executable, str(SRC / "tools" / "gen_font.py"), str(GEN / "felucca_font.h")],

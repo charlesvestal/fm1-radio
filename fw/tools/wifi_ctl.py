@@ -12,8 +12,7 @@
   wifi_ctl.py scan           start a scan; scanlog: put the results in the log
   wifi_ctl.py dump           the crash record (kept through resets), the log, the tasks
   wifi_ctl.py clear          forget the crash record
-  wifi_ctl.py rgload FILE   the Radio Garden station table (tools/rg_sync.py) into the data flash
-  wifi_ctl.py rginfo        what table the FM-1 holds
+  wifi_ctl.py rginfo        the places table built into the FM-1's firmware
   wifi_ctl.py radio         as PLAY on Home: the radio on / off
   wifi_ctl.py bpm N         the tap tempo (41..167)
   wifi_ctl.py fx N          as holding white key N (1..16): its punch-in FX; 0 lets go
@@ -89,52 +88,6 @@ def put7(v, k):
     return [(v >> (7 * i)) & 0x7F for i in range(k)]
 
 
-def rgload(path):
-    """the station table (tools/rg_sync.py) into the FM-1's data flash"""
-    import zlib
-    data = open(path, "rb").read()
-    name = port()
-    if not name:
-        sys.exit("wifi_ctl: no FM-1 MIDI port")
-    with mido.open_input(name) as i, mido.open_output(name) as o:
-        def wait(timeout=10.0):
-            end = time.time() + timeout
-            while time.time() < end:
-                m = i.poll()
-                if m is None:
-                    time.sleep(0.001)
-                    continue
-                if m.type == "sysex" and list(m.data[:3]) == HDR + [0x10]:
-                    t = text(m.data[3:])
-                    if t.startswith("rg "):
-                        return t
-            return None
-        while i.poll():
-            pass
-        o.send(mido.Message("sysex", data=HDR + [0x50] + put7(len(data), 5)))
-        r = wait(20)
-        if r != "rg next 0":
-            sys.exit(f"rgload: begin: {r}")
-        off, t0, CH = 0, time.time(), 504
-        while off < len(data):
-            chunk = data[off:off + CH]
-            for _ in range(8):                   # a lost frame or answer: send it again (the FM-1 skips repeats)
-                o.send(mido.Message("sysex", data=HDR + [0x51] + put7(off, 3) + pack7(chunk)))
-                r = wait(3)
-                if r:
-                    break
-            if not r or not r.startswith("rg next"):
-                sys.exit(f"rgload: at {off}: {r}")
-            off = int(r.split()[2])
-            print(f"\r{off}/{len(data)} bytes  {off / max(time.time() - t0, 0.01) / 1024:.1f} KiB/s", end="", flush=True)
-        print()
-        o.send(mido.Message("sysex", data=HDR + [0x52] + put7(zlib.crc32(data) & 0xFFFFFFFF, 5)))
-        r = wait(30)
-        print(r)
-        if not r or not r.startswith("rg ok"):
-            sys.exit(1)
-
-
 def text(body):
     return bytes(body).decode("ascii", "replace")
 
@@ -183,8 +136,6 @@ def main():
     elif c == "vdc14" and len(a) == 2:
         r = ask(0x44, [int(a[1])], want=(0x10,), timeout=5)
         print(text(r[0][1]) if r else "sent")
-    elif c == "rgload" and len(a) == 2:
-        rgload(a[1])
     elif c == "rginfo":
         r = ask(0x53, want=(0x10,), timeout=5)
         print(text(r[0][1]) if r else "no answer")

@@ -47,7 +47,8 @@ void radio_entropy(uint8_t *p, unsigned n)
 }
 void radio_net_stop(void);
 int radio_net_running(void);
-enum { RN_IDLE, RN_CONNECTING, RN_STREAMING, RN_ERROR, RN_ENDED };
+enum { RN_IDLE, RN_CONNECTING, RN_STREAMING, RN_ERROR, RN_ENDED, RN_UNPLAYABLE };
+static uint8_t radio_unplayable;                  /* the station is not MP3: no point trying again */
 
 enum { RS_OFF, RS_CONNECTING, RS_BUFFERING, RS_PLAYING, RS_ERROR };
 static uint8_t radio_st;
@@ -143,6 +144,7 @@ static void radio_play(uint8_t mode)
         return;
     }
     shim_log("radio: start");
+    radio_unplayable = 0;
     radio_st = RS_CONNECTING;
 }
 
@@ -173,6 +175,12 @@ static void radio_poll(void)
         }
         radio_dropped += radio_wr - radio_rd;
         radio_rd = radio_wr;
+        return;
+    }
+    if (radio_mode != 2 && radio_net_state == RN_UNPLAYABLE && !radio_net_running()) {
+        w_cpy(radio_why, radio_net_why, sizeof radio_why);   /* "can't play AAC": said, not retried */
+        radio_unplayable = 1;
+        radio_st = RS_ERROR;
         return;
     }
     /* the stream dropped (stalled, ended, refused): what is buffered plays on, and it is fetched again,
