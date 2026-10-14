@@ -187,7 +187,10 @@ static void ui_home(void)
         snprintf(line, sizeof line, "%s: trying again", radio_why);
     else
         w_cpy(line, "tuning...", sizeof line);
-    if (fx_held) {                                /* the held effects instead of the status */
+    if (!fx_held && (int32_t)(tempo_shown_until - fm1_ms) > 0) {   /* just tapped: the tempo */
+        snprintf(line, sizeof line, "tempo %u BPM", (unsigned)tempo_bpm);
+        ui_row(3, 96, 22, line, "", K_TEAL, K_DIM, K_BG);
+    } else if (fx_held) {                         /* the held effects instead of the status */
         uint32_t k, o = 0;
         line[0] = 0;
         for (k = 0; k < FX_N && o + 2u < sizeof line; k++)
@@ -323,7 +326,7 @@ static void ui_help(void)
     static const char *const L[8][2] = {
         {"KNOB 1..4", "continent .. station"}, {"SELECT", "next station"}, {"SEL", "browse the world"},
         {"PLAY", "play / stop"}, {"GLO", "WiFi, networks"}, {"MASTER", "volume"},
-        {"keys", "hold for FX, mix them"}, {"", ""}};
+        {"keys / FX", "hold for FX / tap tempo"}, {"", ""}};
     int i;
     ui_title(0, "Controls", "");
     for (i = 0; i < 7; i++)

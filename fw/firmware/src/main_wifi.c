@@ -523,6 +523,36 @@ static void wire_status(void)
 static const uint8_t WHITE_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* F3 .. G5 */
 static uint32_t fx_wire;
 static volatile uint8_t url_restart, shot_req;
+/* tap tempo (FX on Home): the last taps, the tempo they make, when the screen stops showing it */
+static uint32_t tap_t[4], tap_n, tempo_bpm = 120, tempo_t0, tempo_shown_until;
+static void tempo_set(uint32_t beat_ms, uint32_t t0)
+{
+    if (beat_ms < 250u)
+        beat_ms = 250u;                           /* 240 BPM */
+    if (beat_ms > 1500u)
+        beat_ms = 1500u;                          /* 40 BPM */
+    fx_beat = beat_ms * 441u / 10u;
+    tempo_bpm = (60000u + beat_ms / 2u) / beat_ms;
+    tempo_t0 = t0;
+    tempo_shown_until = fm1_ms + 2000u;
+}
+static void tempo_tap(void)
+{
+    uint32_t now = fm1_ms, k, n;
+    if (tap_n && now - tap_t[(tap_n - 1u) % 4u] > 2000u)
+        tap_n = 0;                                /* a pause: a new count */
+    tap_t[tap_n % 4u] = now;
+    tap_n++;
+    n = tap_n < 4u ? tap_n : 4u;
+    if (n >= 2u) {                                /* the mean of the last intervals */
+        uint32_t first = tap_t[(tap_n - n) % 4u];
+        tempo_set((now - first) / (n - 1u), now);
+    } else {
+        tempo_t0 = now;
+        tempo_shown_until = now + 2000u;
+    }
+    (void)k;
+}
 #include "app/rg.c"
 
 static void wire_service(void)
@@ -1019,6 +1049,7 @@ static void fm1_main(void)
         case 0x40: radio_play(wire_arg); break;
         case 0x45: radio_toggle(); break;
         case 0x60: shot_req = (uint8_t)(wire_arg | 0x80u); break;   /* a screenshot: 0 this page, 1..4 another */
+        case 0x48: tempo_set(60000u / (wire_arg ? wire_arg + 40u : 120u), fm1_ms); break;   /* BPM - 40 */
         case 0x47: fx_wire = wire_arg && wire_arg <= FX_N ? 1u << (wire_arg - 1u) : 0u; break;   /* hold FX n */         /* as PLAY on Home */
         case 0x46:                                /* as a knob: level 0..3 (K1..K4), a signed step */
             sel_turn(wire_arg & 3u, (int8_t)(wire_arg2 & 0x40u ? wire_arg2 | 0x80u : wire_arg2));
@@ -1076,6 +1107,8 @@ static void fm1_main(void)
             fx_held = h | fx_wire;
         }
         if (ui_page == PG_HOME) {
+            if (down & (1u << B_FX))
+                tempo_tap();
             if (down & (1u << B_PLAY))
                 radio_toggle();
             if ((down & (1u << B_SEL)) && sel_valid()) {
@@ -1178,6 +1211,8 @@ static void fm1_main(void)
             if (ui_page == PG_HOME) {
                 int w;
                 lb = 1u << B_PLAY | 1u << B_GLO | (sel_valid() ? 1u << B_SEL : 0u);
+                if ((fm1_ms - tempo_t0) % (60000u / tempo_bpm) < 90u)
+                    lb |= 1u << B_FX;             /* FX flashes on the beat */
                 if (radio_st == RS_PLAYING)       /* the FX keys, and the held ones off as they play */
                     for (w = 0; w < 16; w++)
                         if (!(fx_held >> w & 1u))

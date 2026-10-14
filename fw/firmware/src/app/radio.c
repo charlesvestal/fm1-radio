@@ -291,19 +291,20 @@ static void radio_poll(void)
  * modulator, the chops and the mute. */
 enum { FX_LP, FX_HP, FX_PHONE, FX_CRUSH, FX_ST4, FX_ST8, FX_ST16, FX_ST32, FX_TAPE, FX_REV, FX_CHOP8, FX_CHOP16,
        FX_RING, FX_HALF, FX_MUTE, FX_LOFI, FX_N };
-static const char *const FX_NAME[FX_N] = {"low-pass", "high-pass", "telephone", "crush", "stutter 1/4",
-    "stutter 1/8", "stutter 1/16", "stutter 1/32", "tape stop", "reverse", "chop 1/8", "chop 1/16", "ring mod",
+static const char *const FX_NAME[FX_N] = {"low-pass", "high-pass", "telephone", "crush", "stutter 1/8",
+    "stutter 1/16", "stutter 1/32", "stutter 1/64", "tape stop", "reverse", "chop 1/8", "chop 1/16", "ring mod",
     "half speed", "mute", "lo-fi"};
 #define FX_SOURCES ((1u << FX_ST4) | (1u << FX_ST8) | (1u << FX_ST16) | (1u << FX_ST32) | (1u << FX_TAPE) | \
                     (1u << FX_REV) | (1u << FX_HALF))
 static volatile uint32_t fx_held;
+static volatile uint32_t fx_beat = 22050u;        /* a beat in output samples (44.1 kHz): the tap tempo, 120 BPM */
 static struct {
     uint32_t hw, half;                            /* history write index, the half-rate phase */
     uint32_t src, start;                          /* the source playing (FX_N: none), where its window starts */
     float pos, speed;                             /* read position in the history (samples), its rate */
     float lp[2][2], hp[2][2], bp[2][2];           /* the filters' states: [channel][low, band] */
     float gate, ring_c, ring_s;                   /* the chop / mute gain; the ring oscillator */
-    uint32_t crush_n, chop_n;
+    uint32_t crush_n, chop_n, len, held_was;      /* len: the stutter's loop, history samples */
     float crush_l, crush_r;
 } fx OM_POOL;                                     /* set up by fx_reset */
 
@@ -342,10 +343,13 @@ static void fx_process(float *l, float *r)
             break;
         }
     if (src != fx.src) {                          /* a source starts (or ends): its window in the history */
-        static const uint16_t LEN[4] = {5512, 2756, 1378, 689};   /* 250, 125, 62.5, 31 ms at 22.05 kHz */
         fx.src = src;
-        if (src >= FX_ST4 && src <= FX_ST32) {
-            fx.start = (fx.hw + FX_HIST - LEN[src - FX_ST4]) % FX_HIST;
+        if (src >= FX_ST4 && src <= FX_ST32) {    /* a 1/8 .. 1/64 note at the tempo, halved while too long */
+            uint32_t n = fx_beat >> (2u + (src - FX_ST4));   /* half a beat at 44.1 kHz = a beat >> 2 at 22.05 */
+            while (n > FX_HIST - 64u)
+                n >>= 1;
+            fx.len = n ? n : 1u;
+            fx.start = (fx.hw + FX_HIST - fx.len) % FX_HIST;
             fx.pos = (float)fx.start;
             fx.speed = 0.5f;
         } else if (src == FX_TAPE || src == FX_HALF) {
@@ -365,10 +369,9 @@ static void fx_process(float *l, float *r)
         *l = *r = v;
         fx.pos += fx.speed;
         if (src >= FX_ST4 && src <= FX_ST32) {
-            static const uint16_t LEN[4] = {5512, 2756, 1378, 689};
-            float end = (float)fx.start + (float)LEN[src - FX_ST4];
+            float end = (float)fx.start + (float)fx.len;
             if (fx.pos >= end)
-                fx.pos -= (float)LEN[src - FX_ST4];
+                fx.pos -= (float)fx.len;
         } else if (src == FX_TAPE) {
             fx.speed *= 0.99996f;                 /* to a stop in about a second */
         }
@@ -408,13 +411,20 @@ static void fx_process(float *l, float *r)
         *l *= fx.ring_s;
         *r *= fx.ring_s;
     }
-    {   /* the chops and the mute: a gain that moves in 2 ms, not a click */
+    {   /* the chops (1/8 or 1/16 notes at the tempo, open for the first half, from the press) and the mute: a
+         * gain that moves in 2 ms, not a click */
         float target = 1.0f;
+        uint32_t chops = held & (1u << FX_CHOP8 | 1u << FX_CHOP16);
+        if (chops & ~fx.held_was)
+            fx.chop_n = 0;                        /* a chop pressed: it starts open, on the press */
+        fx.held_was = held;
         fx.chop_n++;
-        if (held >> FX_CHOP8 & 1u)
-            target = (fx.chop_n / 2756u) & 1u ? 0.0f : 1.0f;   /* 1/8 at ~120 bpm: 62.5 ms on, 62.5 off */
-        if (held >> FX_CHOP16 & 1u)
-            target = (fx.chop_n / 1378u) & 1u ? 0.0f : 1.0f;
+        if (chops) {
+            uint32_t period = held >> FX_CHOP16 & 1u ? fx_beat >> 2 : fx_beat >> 1;
+            if (period < 64u)
+                period = 64u;
+            target = fx.chop_n % period < period / 2u ? 1.0f : 0.0f;
+        }
         if (held >> FX_MUTE & 1u)
             target = 0.0f;
         fx.gate += (target - fx.gate) * 0.011f;

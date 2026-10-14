@@ -121,6 +121,7 @@ the first one it finds. To forget one, press **Forget** next to it on `wifi.html
 | **KNOB 3** | City. |
 | **KNOB 4** or **SELECT** | Station in the city. |
 | **MASTER** | Volume. |
+| **FX** | Tap tempo for the effects. |
 | **SEL** | Browse the list of continents, countries, cities and stations. |
 | **GLO** | The WiFi page, and back. |
 | Hold **HOME** | The controls, on the screen. |
@@ -147,13 +148,13 @@ stop it. Hold several to mix them. The screen shows what is held, and a held key
 | 2 | High-pass filter |
 | 3 | Telephone: a narrow, driven band |
 | 4 | Bitcrush |
-| 5 | Stutter, 1/4: repeats the last 250 ms |
-| 6 | Stutter, 1/8: the last 125 ms |
-| 7 | Stutter, 1/16: the last 62 ms |
-| 8 | Stutter, 1/32: the last 31 ms |
+| 5 | Stutter, 1/8: repeats the last eighth note |
+| 6 | Stutter, 1/16 |
+| 7 | Stutter, 1/32 |
+| 8 | Stutter, 1/64 |
 | 9 | Tape stop |
 | 10 | Reverse |
-| 11 | Chop, 1/8 |
+| 11 | Chop, 1/8: open for the first half of each eighth note, from your press |
 | 12 | Chop, 1/16 |
 | 13 | Ring modulator |
 | 14 | Half speed |
@@ -164,7 +165,12 @@ stop it. Hold several to mix them. The screen shows what is held, and a held key
 
 The stutters, tape stop, reverse and half speed play back the last quarter second, in mono. Only one
 of them plays at a time: with two held, the lower key wins. The filters, crushers, ring modulator,
-chops and mute work on top of them. The chops run at about 120 BPM: a stream has no tempo to follow.
+chops and mute work on top of them.
+
+**Tap tempo.** The stutters and chops follow a tempo, 120 BPM at start. Tap **FX** on Home in time
+with the music to set it: the last four taps count, and a pause of two seconds starts a new count. The
+screen shows the tempo for two seconds, and the FX light flashes on the beat. The history holds about a
+quarter second, so below about 108 BPM the 1/8 stutter plays a 1/16 instead.
 
 ## Debugging over USB
 
@@ -180,10 +186,12 @@ chops and mute work on top of them. The chops run at about 120 BPM: a stream has
 | `radio` | As PLAY: play or stop. |
 | `turn K D` | As turning knob K+1 (0 to 3) by D. |
 | `fx N` | As holding white key N (1 to 16); `fx 0` lets go. |
+| `bpm N` | Set the tap tempo (41 to 167). |
 | `url URL` | Play the stream at URL, `http://` or `https://`, until the next tune. |
 
 `fw/tools/screenshot.py OUT.png [home|browse|wifi|help]` saves the screen as a PNG: the FM-1 redraws
-the page and sends it over USB as it draws. The pictures here were taken that way.
+the page and sends it over USB as it draws, which pauses the audio for about a second. The pictures
+here were taken that way.
 | `rgload FILE`, `rginfo` | Send the station table; show the one the FM-1 holds. |
 | `reboot` | Restart. |
 

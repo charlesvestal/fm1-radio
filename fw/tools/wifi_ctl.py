@@ -15,6 +15,7 @@
   wifi_ctl.py rgload FILE   the Radio Garden station table (tools/rg_sync.py) into the data flash
   wifi_ctl.py rginfo        what table the FM-1 holds
   wifi_ctl.py radio         as PLAY on Home: the radio on / off
+  wifi_ctl.py bpm N         the tap tempo (41..167)
   wifi_ctl.py fx N          as holding white key N (1..16): its punch-in FX; 0 lets go
   wifi_ctl.py turn K D      as turning KNOB K+1 (0..3: continent, country, city, station) by D
   wifi_ctl.py reboot         restart (answered even while the main loop waits in the library)
@@ -190,6 +191,8 @@ def main():
     elif c == "radio":
         ask(0x45)
         print("sent")
+    elif c == "bpm" and len(a) == 2:             # the tap tempo, 41..167 BPM
+        ask(0x48, [max(1, min(127, int(a[1]) - 40))])
     elif c == "fx" and len(a) == 2:              # hold punch-in FX N (1..16), 0 = let go
         ask(0x47, [int(a[1]) & 0x7F])
     elif c == "turn" and len(a) == 3:
