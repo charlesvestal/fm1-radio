@@ -1,0 +1,20 @@
+# Radio's build settings (fm1-base's tools/build.py: ./build.sh)
+name = "RADIO"                 # the build's files: radio.fwsc
+id_prefix = "FM-1_13"          # package identity: dev FM-1_1300, releases FM-1_13XXYYZZ
+usb_manufacturer = "fm1-radio"
+usb_product = "RADIO FM-1"
+wifi = true                    # WiFi (fm1-base's); no Bluetooth in the same build
+usb_audio_in = false           # (the RAM goes to WiFi and the stream)
+usb_audio_out = false
+words = "words.tsv"
+vendored = ["third_party/"]           # BearSSL and minimp3: the register check skips them (x86 / POWER8 code off)
+device_include = ["third_party/compat"]   # minimp3's <string.h> / <stdlib.h>: the toolchain has no C library headers
+# the stream and Radio Garden (net/radio_net.c), with BearSSL for https, built as the SDK builds code that talks lwIP
+net = ["net/radio_net.c", "third_party/bearssl/src/**/*.c"]
+net_include = ["third_party/bearssl/inc", "third_party/bearssl/src"]
+# BearSSL on a bare 32-bit chip: no OS randomness or clock (the app seeds it), no x86 / POWER8 code, no unaligned access
+net_cflags = ["-DBR_USE_UNIX_TIME=0", "-DBR_USE_WIN32_TIME=0", "-DBR_USE_URANDOM=0", "-DBR_USE_GETENTROPY=0",
+              "-DBR_USE_WIN32_RAND=0", "-DBR_RDRAND=0", "-DBR_AES_X86NI=0", "-DBR_SSE2=0", "-DBR_POWER8=0",
+              "-DBR_64=0", "-DBR_INT128=0", "-DBR_UMUL128=0", "-DBR_LE_UNALIGNED=0", "-DBR_BE_UNALIGNED=0"]
+# Radio Garden's places, packed into the image (fetched once into build/rg/places.json)
+gen = ["tools/rg_places.py --c-out {gen}/rg_places_data.h"]
