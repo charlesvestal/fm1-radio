@@ -30,9 +30,9 @@ them from each user's own AC79 SDK.
 
 ## Place and station data
 
-The build fetches Radio Garden's list of places once (`app/tools/rg_places.py`, kept in `app/build/rg/`) and packs
-the place names into the firmware. The stations are fetched from Radio Garden while the radio runs. No place or
-station data is in this repository. The streams belong to their stations.
+The FM-1 fetches Radio Garden's list of places itself, once, into its own flash (`app/places.c`), and a place's
+stations when it is chosen. No place or station data is in the firmware or in this repository
+(`app/tools/rg_places.py` builds a table only for the host simulator). The streams belong to their stations.
 
 ## Trademarks
 

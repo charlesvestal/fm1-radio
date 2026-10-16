@@ -12,7 +12,8 @@ base/tools/fm1_remote.py wifi join SSID PASSWORD, wifi status, ...; the crash an
   radio_ctl.py turn K D      as turning KNOB K+1 (0..3: continent, country, place, station) by D
   radio_ctl.py fx N          as holding white key N (1..16): its punch-in FX; 0 lets go
   radio_ctl.py bpm N         the tap tempo (41..167)
-  radio_ctl.py rginfo        the places table built into the firmware
+  radio_ctl.py rginfo        the places table the FM-1 fetched
+  radio_ctl.py places        fetch the places again (Radio Garden's list, a few minutes)
 
 Text travels as two nibbles a byte.
 """
@@ -83,6 +84,9 @@ def main():
     elif c == "rginfo":
         r = ask(0x53, want=(0x10,), timeout=5)
         print(text(r[0][1]) if r else "no answer")
+    elif c == "places":
+        ask(0x54)
+        print("sent: the places are fetched again (Home shows the time left)")
     elif c == "radio":
         ask(0x45)
         print("sent")

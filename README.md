@@ -57,13 +57,14 @@ starts in a safe mode with USB on, and holding OCT− and OCT+ for 5 seconds sta
 
 ### The places
 
-The build packs Radio Garden's list of places into the firmware: 12,844 places in 227 countries, names
-only, compressed a country at a time (78 KB). It fetches the list once, the first time you build, and
-keeps it in `app/build/rg/places.json`; `python3 app/tools/rg_places.py --refresh` fetches it again. The
-places are Radio Garden's, so they're never committed here.
+Radio fetches Radio Garden's list of places itself, the first time it has WiFi: about 12,900 places in 228 countries,
+names only. It reads the 1.9 MB list a few times (a minute or so each, paced so the WiFi keeps up) and keeps the
+table in the FM-1's data flash, where it stays: Home shows the time left, and it happens only once.
+`python3 app/tools/radio_ctl.py places` fetches them again. Nothing of Radio Garden's is in the firmware or in
+this repository.
 
-The stations aren't in the firmware. When you choose a place, the FM-1 asks Radio Garden for its stations,
-and plays a station through Radio Garden's link to its stream.
+The stations aren't kept either. When you choose a place, the FM-1 asks Radio Garden for its stations, and plays a
+station through Radio Garden's link to its stream.
 
 ## Using it
 
@@ -218,10 +219,10 @@ now free.
 The FM-1 has no external RAM, so WiFi has to fit in the chip's own memory beside the radio. The figures are from
 the build of October 2026 on fm1-base, rounded.
 
-- **Flash:** the image is 562 KB of the 581 KB app slot, 19 KB free. WiFi is about 299 KB of it (JieLi's driver
+- **Flash:** the image is 492 KB of the 581 KB app slot, 90 KB free. WiFi is about 299 KB of it (JieLi's driver
   146 KB, the WPA supplicant 77 KB, lwIP 51 KB, the RF layer, crypto, the shim and its glue 25 KB), HTTPS (BearSSL
-  and the TLS glue) 36 KB, Radio Garden's places 78 KB, and the radio, minimp3, the pages, the fonts and the
-  platform the rest. The large font fm1-base draws its splash with is left out (`APP_BIG_FONT FONT_M`: 20 KB).
+  and the TLS glue) 36 KB, and the radio, minimp3, the pages, the fonts and the platform the rest (the places are in the data flash, fetched
+  by the FM-1: about 125 KB). The large font fm1-base draws its splash with is left out (`APP_BIG_FONT FONT_M`: 20 KB).
 - **RAM:** `.data` and `.bss` use 129.6 KB of 131 KB (fm1-base's WiFi memory map: 128 KB of RAM). WiFi's driver,
   RF layer, lwIP and the shim's 14-task table are about 100 KB of it.
 - **The pool:** 307 KB of 311 KB: 13 task stacks of 8 KB (104 KB), the heap (144 KB), lwIP's packet buffers
