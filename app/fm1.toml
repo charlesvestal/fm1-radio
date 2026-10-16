@@ -7,6 +7,9 @@ wifi = true                    # WiFi (fm1-base's); no Bluetooth in the same bui
 usb_audio_in = false           # (the RAM goes to WiFi and the stream)
 usb_audio_out = false
 words = "words.tsv"
+# PacketVideo's AAC decoder (Android 4.1.2, Apache-2.0), built as C, AAC-LC only (no SBR or PS: the RAM)
+o2 = ["third_party/pvaac/*.c"]
+o2_include = ["third_party/pvaac/pv_fm1.h"]
 vendored = ["third_party/"]           # BearSSL and minimp3: the register check skips them (x86 / POWER8 code off)
 device_include = ["third_party/compat"]   # minimp3's <string.h> / <stdlib.h>: the toolchain has no C library headers
 # the stream and Radio Garden (net/radio_net.c), with BearSSL for https, built as the SDK builds code that talks lwIP

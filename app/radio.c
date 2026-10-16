@@ -7,6 +7,8 @@
 #define MINIMP3_ONLY_MP3
 #define MINIMP3_NO_SIMD
 #include "third_party/minimp3.h"
+#include "third_party/pvaac/pv_fm1.h"                /* PacketVideo's AAC decoder (Apache-2.0): AAC-LC in ADTS */
+#include "third_party/pvaac/pvmp4audiodecoder_api.h"
 
 extern void *malloc(unsigned long n);
 extern void free(void *p);
@@ -18,13 +20,15 @@ extern void free(void *p);
 #define RADIO_URL "http://ice4.somafm.com/groovesalad-128-mp3"
 static char radio_url_buf[160] __attribute__((section(".noinit")));   /* the wire's url (0x43); RAM is full */
 static const char *radio_url = RADIO_URL;
-#define NET_RING (20u * 1024u)                    /* ~1.25 s of 128 kbit/s; the WiFi driver needs ~20 KiB of
-                                                   * the heap left over, or its sends fail (connect: 113) */
+#define NET_RING (20u * 1024u)                    /* ~1.25 s of 128 kbit/s (36 KB stalled as often: a weak link's gaps
+                                                   * last seconds); the WiFi driver needs ~20 KiB of the heap left
+                                                   * over, or its sends fail (connect: 113) */
 #define PCM_FRAMES (3u * 1152u)                  /* ~78 ms */
 #define LIN_MAX (6u * 1024u)                      /* the decoder's window when the ring wraps */
 
 static volatile uint32_t pcm_r, pcm_w;            /* frames: the ISR reads, the main loop writes */
 extern volatile int radio_net_state;
+extern volatile int radio_net_aac;
 extern volatile uint32_t radio_rd, radio_wr;
 extern char radio_net_why[32], radio_net_name[48];
 int radio_net_start(const char *u, uint8_t *buf, uint32_t size);
@@ -76,20 +80,72 @@ static int16_t *pcm_tmp;                          /* MINIMP3_MAX_SAMPLES_PER_FRA
 #define FX_HIST 6144u                             /* the FX history, half-rate samples: ~279 ms */
 static int16_t *fx_hist;
 
+/* the decoders, one at a time (the RAM): MP3's (minimp3, 11 KB) or AAC's (PacketVideo's, 53 KB), taken when a
+ * stream's format is known (its Content-Type: radio_net_aac), the other's given back */
+static uint8_t dec_kind;                          /* 0 none, 1 MP3, 2 AAC */
+static tPVMP4AudioDecoderExternal *aac_ext;
+static void *aac_mem;
+static int16_t *aac_out;                          /* a frame: 1024 stereo */
+static uint32_t radio_aac_errs;
+static void dec_drop(void)
+{
+    free(mp3);
+    free(pcm_tmp);
+    free(aac_ext);
+    free(aac_mem);
+    free(aac_out);
+    mp3 = 0;
+    pcm_tmp = 0;
+    aac_ext = 0;
+    aac_mem = 0;
+    aac_out = 0;
+    dec_kind = 0;
+}
+static int dec_use(uint8_t kind)                  /* 0 = ready */
+{
+    if (kind == dec_kind)
+        return 0;
+    dec_drop();
+    if (kind == 1) {
+        mp3 = malloc(sizeof *mp3);
+        pcm_tmp = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof *pcm_tmp);
+        if (!mp3 || !pcm_tmp) {
+            dec_drop();
+            return -1;
+        }
+        mp3dec_init(mp3);
+    } else {
+        aac_ext = malloc(sizeof *aac_ext);
+        aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements());
+        aac_out = malloc(2048u * sizeof *aac_out);
+        if (!aac_ext || !aac_mem || !aac_out) {
+            dec_drop();
+            return -1;
+        }
+        memset(aac_ext, 0, sizeof *aac_ext);
+        aac_ext->outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
+        aac_ext->desiredChannels = 2;
+        aac_ext->aacPlusEnabled = 0;              /* (built without SBR: an HE-AAC stream plays its AAC core) */
+        if (PVMP4AudioDecoderInitLibrary(aac_ext, aac_mem)) {
+            dec_drop();
+            return -1;
+        }
+        radio_aac_errs = 0;
+    }
+    dec_kind = kind;
+    return 0;
+}
+
 static int radio_alloc(void)
 {
     if (net_buf)
         return 0;
     net_buf = malloc(NET_RING);
     pcm_buf = malloc(PCM_FRAMES * 4u);
-    mp3 = malloc(sizeof *mp3);
-    pcm_tmp = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof *pcm_tmp);
-    if (!net_buf || !pcm_buf || !mp3 || !pcm_tmp) {
-        free(net_buf); free(pcm_buf); free(mp3); free(pcm_tmp);
-        pcm_tmp = 0;
+    if (!net_buf || !pcm_buf) {
+        free(net_buf); free(pcm_buf);
         net_buf = 0;
         pcm_buf = 0;
-        mp3 = 0;
         return -1;
     }
     if (!fx_hist) {                               /* the FX history, kept: without it, no stutters */
@@ -114,7 +170,7 @@ static void radio_play(uint8_t mode)
             radio_st = RS_ERROR;
             return;
         }
-        mp3dec_init(mp3);
+        dec_drop();                               /* (the stream's format picks a decoder: dec_use) */
         pcm_r = pcm_w = 0;
         radio_frames = radio_hz = radio_kbps = 0;
         radio_dec_us = radio_dec_n = radio_rebuffers = 0;
@@ -133,7 +189,7 @@ static void radio_play(uint8_t mode)
         radio_st = RS_ERROR;
         return;
     }
-    mp3dec_init(mp3);
+    dec_drop();                                   /* (the stream's format picks a decoder: dec_use) */
     pcm_r = pcm_w = 0;
     radio_frames = radio_hz = radio_kbps = 0;
     radio_dec_us = radio_dec_n = radio_rebuffers = 0;
@@ -215,6 +271,7 @@ static void radio_poll(void)
         const uint8_t *in;
         mp3dec_frame_info_t info;
         int samples;
+        const int16_t *src = pcm_tmp;
         if (PCM_FRAMES - (pcm_w - pcm_r) < 1152u)
             break;                                /* no room for a frame */
 #ifdef RADIO_LOCAL_TEST
@@ -244,7 +301,42 @@ static void radio_poll(void)
             memcpy(lin_buf + a, net_buf, n - a);
             in = lin_buf;
         }
+        if (dec_use(radio_mode != 2 && radio_net_aac ? 2 : 1)) {   /* (mode 2: the built-in MP3) */
+            w_cpy(radio_why, "out of memory", sizeof radio_why);
+            radio_st = RS_ERROR;
+            return;
+        }
         t0 = plat_ms();
+        if (dec_kind == 2) {                      /* AAC: an ADTS frame (the decoder finds its header) */
+            int err;
+            aac_ext->pInputBuffer = (UChar *)in;
+            aac_ext->inputBufferCurrentLength = (Int)n;
+            aac_ext->inputBufferMaxLength = 0;
+            aac_ext->inputBufferUsedLength = 0;
+            aac_ext->remainderBits = 0;
+            aac_ext->pOutputBuffer = aac_out;
+            aac_ext->pOutputBuffer_plus = aac_out;
+            aac_ext->repositionFlag = 0;
+            err = PVMP4AudioDecodeFrame(aac_ext, aac_mem);
+            radio_dec_us += (plat_ms() - t0) * 1000u;
+            radio_dec_n++;
+            if (err == MP4AUDEC_INCOMPLETE_FRAME) {
+                if (n >= LIN_MAX)
+                    radio_rd += n / 2u;           /* no frame in a full window: skip garbage */
+                break;
+            }
+            if (err != MP4AUDEC_SUCCESS) {        /* a bad frame: past it (or a byte), the decoder finds sync */
+                radio_rd += aac_ext->inputBufferUsedLength > 0 ? (uint32_t)aac_ext->inputBufferUsedLength : 1u;
+                radio_aac_errs++;
+                continue;
+            }
+            radio_rd += (uint32_t)aac_ext->inputBufferUsedLength;
+            samples = aac_ext->frameLength;
+            info.hz = (int)aac_ext->samplingRate;
+            info.channels = 2;                    /* (mono comes copied into both) */
+            info.bitrate_kbps = (int)(aac_ext->bitRate / 1000);
+            src = aac_out;
+        } else {
         samples = mp3dec_decode_frame(mp3, in, (int)n, pcm_tmp, &info);
         radio_dec_us += (plat_ms() - t0) * 1000u;
         radio_dec_n++;
@@ -254,6 +346,8 @@ static void radio_poll(void)
             break;
         }
         radio_rd += (uint32_t)info.frame_bytes;
+        src = pcm_tmp;
+        }
 #ifdef RADIO_LOCAL_TEST
     decoded:
 #endif
@@ -269,10 +363,10 @@ static void radio_poll(void)
             for (i = 0; i < (uint32_t)samples; i++, w++) {
                 int16_t *d = &pcm_buf[(w % PCM_FRAMES) * 2u];
                 if (info.channels == 2) {
-                    d[0] = pcm_tmp[2u * i];
-                    d[1] = pcm_tmp[2u * i + 1u];
+                    d[0] = src[2u * i];
+                    d[1] = src[2u * i + 1u];
                 } else {
-                    d[0] = d[1] = pcm_tmp[i];
+                    d[0] = d[1] = src[i];
                 }
             }
             RING_PUBLISH();

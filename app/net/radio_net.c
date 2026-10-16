@@ -3,8 +3,8 @@
 /* The radio's network side, built against the SDK's lwIP headers (sockets, DNS); the app sees only
  * radio_net_* and rgn_*.
  *  - The stream: a task that fetches an HTTP or HTTPS stream (Icecast / SHOUTcast) into a ring the app's
- *    decoder drains. Redirects (3xx Location) are followed a few times. A stream that is not MP3 (AAC, HLS,
- *    a page) is refused by its Content-Type.
+ *    decoder drains. Redirects (3xx Location) are followed a few times. A stream that is not MP3 or AAC in
+ *    ADTS frames (MP4, HLS, Ogg, a page) is refused by its Content-Type.
  *  - Radio Garden: a task that finds a place by name (its search) and reads the place's stations (its
  *    channels page), as the JSON arrives, into a list the app browses. A station plays through Radio
  *    Garden's listen link, which redirects to the real stream.
@@ -27,6 +27,7 @@ extern void radio_entropy(uint8_t *p, unsigned n);   /* the app's: timing and co
 
 enum { RN_IDLE, RN_CONNECTING, RN_STREAMING, RN_ERROR, RN_ENDED, RN_UNPLAYABLE };
 volatile int radio_net_state;
+volatile int radio_net_aac;                       /* the stream is AAC (ADTS), else MP3 */
 volatile uint32_t radio_rd, radio_wr;            /* the ring: the task writes, the app reads (bytes, ever) */
 static uint8_t *ring;
 static uint32_t ring_size;
@@ -367,11 +368,14 @@ static int http_open(conn_t *c, char *u, unsigned umax, int json)
         shim_log(c->why);
         return -1;
     }
-    /* a stream the decoder cannot play: AAC (aac, aacp, mp4), HLS (mpegurl), Ogg, a web page */
-    if (!json && type[0] && (has_word(type, "aac") || has_word(type, "mp4") || has_word(type, "mpegurl") ||
+    /* a stream the decoders cannot play: AAC in an MP4 container, HLS (mpegurl), Ogg, a web page. MP3 and AAC
+     * in ADTS frames (aac, aacp) are played: which one, radio_net_aac */
+    if (!json)
+        radio_net_aac = type[0] && has_word(type, "aac") && !has_word(type, "mp4");
+    if (!json && type[0] && (has_word(type, "mp4") || has_word(type, "mpegurl") ||
                              has_word(type, "ogg") || has_word(type, "html"))) {
         conn_close(c);
-        snprintf(c->why, 32, "can't play %s", has_word(type, "aac") || has_word(type, "mp4") ? "AAC" :
+        snprintf(c->why, 32, "can't play %s", has_word(type, "mp4") ? "MP4" :
                  has_word(type, "mpegurl") ? "HLS" : has_word(type, "ogg") ? "Ogg" : "a page");
         shim_log(c->why);
         return -2;
