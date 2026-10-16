@@ -444,6 +444,10 @@ static void wire_dump(void)
     radio_ui_dump();
 #ifndef PLAT_HOST
     {
+        extern void shim_os_dump(void);
+        shim_os_dump();                           /* each task, what it waits for, its deepest stack: into the log */
+    }
+    {
         extern uint32_t shim_heap_used, shim_heap_peak;
         extern const uint32_t shim_heap_size;
         snprintf(b, sizeof b, "heap %u used, %u peak, of %u", (unsigned)shim_heap_used, (unsigned)shim_heap_peak,
@@ -455,8 +459,11 @@ static void wire_dump(void)
              radio_net_state, (unsigned)(radio_wr - radio_rd), (unsigned)NET_RING, (unsigned)(pcm_w - pcm_r),
              (unsigned)radio_frames, (unsigned)radio_hz, (unsigned)radio_kbps);
     wire_line(b);
-    snprintf(b, sizeof b, "  under %u  rebuf %u  reconn %u  %s", (unsigned)radio_underruns,
-             (unsigned)radio_rebuffers, (unsigned)radio_reconnects, radio_why);
+    snprintf(b, sizeof b, "  under %u  rebuf %u  reconn %u  %s%s", (unsigned)radio_underruns,
+             (unsigned)radio_rebuffers, (unsigned)radio_reconnects, dec_kind == 2 ? "AAC " : dec_kind == 1 ? "MP3 " : "",
+             radio_why);
+    wire_line(b);
+    snprintf(b, sizeof b, "  aac bad frames %u", (unsigned)radio_aac_errs);
     wire_line(b);
     {   /* rates since the last dump: what came in, what was decoded, how often the main loop went round */
         static uint32_t t_last, wr_last, fr_last, loops_last;
@@ -489,7 +496,10 @@ int app_sysex(const uint8_t *p, uint32_t n)
             for (i = 3; i + 1u < n && k + 1u < sizeof radio_url_buf; i += 2)
                 radio_url_buf[k++] = (char)((p[i] & 15u) << 4 | (p[i + 1] & 15u));
             radio_url_buf[k] = 0;
-            radio_url = k ? radio_url_buf : RADIO_URL;
+            /* as the station's own link (the tuning plays play_url): it plays until the next tune */
+            w_cpy(play_url, k ? radio_url_buf : RADIO_URL, sizeof play_url);
+            radio_url = play_url;
+            radio_want = 1;
             url_restart = 1;                      /* the main loop restarts the stream on it */
         }
         break;
@@ -753,7 +763,7 @@ void app_loop(void)
 #ifdef PLAT_HOST
 /* the host simulator has no lwIP (net/radio_net.c is the device's): Radio Garden answers with two stations, and a
  * stream cannot start */
-volatile int radio_net_state, rgn_state;
+volatile int radio_net_state, rgn_state, radio_net_aac;
 volatile uint32_t radio_rd, radio_wr, rgn_n;
 char radio_net_why[32], radio_net_name[48], rgn_why[32];
 static rgn_station_t host_st[2] = {{"aaaa1111", "Host FM"}, {"bbbb2222", "Simulated Radio"}};
