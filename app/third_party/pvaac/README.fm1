@@ -1,0 +1,4 @@
+PacketVideo's AAC decoder (AAC-LC, HE-AAC: SBR, PS), as in Android 4.1.2
+(https://android.googlesource.com/platform/frameworks/av/+/android-4.1.2_r1/media/libstagefright/codecs/aacdec),
+Apache-2.0 (NOTICE). Android's wrappers (SoftAAC.cpp, AACDecoder.cpp) left out; the .cpp files renamed .c and
+built as C with pv_fm1.h; get_audio_specific_config.c changed in one line (a C cast), marked "fm1-radio".
