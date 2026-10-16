@@ -8,26 +8,19 @@ It is a proof of concept: it works, and the rough edges are listed at the end.
 
 ![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
 
-## Licensing status
+## Licensing
 
-**Source only, no binaries.** The source is free software under GPL-3.0-only, the licence of
-[Felucca](https://github.com/hugelton/Felucca), whose platform layer it is built on. A built firmware
-links JieLi's closed WiFi libraries from the AC79 SDK. The GPL does not allow
-distributing that combination without an additional permission under its section 7 from Felucca's
-copyright holder, Hügelton Instruments. That permission has been asked for and not yet given. Until
-then:
-
-- this repository has no releases and no firmware files;
-- you may build the firmware for your own FM-1, but you may not share the built file.
-
-For where each part of the code comes from, see [`fw/LICENSING.md`](fw/LICENSING.md).
+The source is free software under MPL-2.0. Radio is built on [fm1-base](https://github.com/charlesvestal/fm1-base),
+the MPL platform for FM-1 firmware (from Felucca, with its author's permission), so the firmware may link JieLi's
+WiFi libraries, which are Apache-2.0. There are no releases yet. For where each part of the code comes from, see
+[`LICENSING.md`](LICENSING.md).
 
 ## Building
 
 ### What you need
 
 - macOS or Linux, with Python 3.
-- Pillow with libraqm (the build draws its font with it). Homebrew's Python has both:
+- Pillow with libraqm (the build draws its fonts with it). Homebrew's Python has both:
   `brew install python pillow`. Use that Python to run the build.
 - mido and python-rtmidi, to install and to talk to the FM-1: `pip3 install mido python-rtmidi`.
 - Docker or podman. JieLi's toolchain runs on Linux x86-64 only, so on a Mac the build runs each
@@ -36,7 +29,7 @@ For where each part of the code comes from, see [`fw/LICENSING.md`](fw/LICENSING
 - JieLi's Linux toolchain:
 
   ```sh
-  fw/tools/get_toolchain.sh              # installs to ~/.jieli/toolchain
+  base/tools/get_toolchain.sh            # installs to ~/.jieli/toolchain
   ```
 
 - The JieLi AC79 SDK (Apache-2.0), version 1.2.1. The build takes JieLi's libraries, lwIP's sources
@@ -50,14 +43,13 @@ For where each part of the code comes from, see [`fw/LICENSING.md`](fw/LICENSING
 ### Build and install
 
 ```sh
-cd fw
-AC79_SDK=~/fw-AC79_AIoT_SDK JIELI_TOOLCHAIN=~/.jieli/toolchain \
-    /opt/homebrew/bin/python3 tools/build.py --wifi
-python3 tools/fm1_install.py build/radio.fwsc --yes      # the FM-1 plugged in over USB
+git submodule update --init --recursive          # fm1-base in base/
+PYTHON=/opt/homebrew/bin/python3 ./build.sh
+python3 base/tools/fm1_install.py app/build/radio.fwsc --yes      # the FM-1 plugged in over USB
 ```
 
-The build makes `fw/build/radio.fwsc` and checks the image and RAM sizes. It runs about a
-minute; it keeps one toolchain container running, which stops after an hour idle.
+The build makes `app/build/radio.fwsc` and checks the image and RAM sizes. `./build.sh --host` builds the
+host simulator instead (`app/build/host/radio_host`), with a stand-in network.
 
 To go back to M-VAVE's firmware, use the web installer on
 [FoMni's site](https://charlesvestal.github.io/fm1-fomni/install/). An FM-1 that fails to start twice
@@ -67,7 +59,7 @@ starts in a safe mode with USB on, and holding OCT− and OCT+ for 5 seconds sta
 
 The build packs Radio Garden's list of places into the firmware: 12,844 places in 227 countries, names
 only, compressed a country at a time (78 KB). It fetches the list once, the first time you build, and
-keeps it in `fw/build/rg/places.json`; `python3 tools/rg_places.py --refresh` fetches it again. The
+keeps it in `app/build/rg/places.json`; `python3 app/tools/rg_places.py --refresh` fetches it again. The
 places are Radio Garden's, so they're never committed here.
 
 The stations aren't in the firmware. When you choose a place, the FM-1 asks Radio Garden for its stations,
@@ -82,9 +74,8 @@ The FM-1 joins 2.4 GHz networks only, open or WPA2 with a password. It can't see
 With no network saved, the FM-1 starts on the list of networks around it, already scanning: turn
 **SELECT** to yours and press **PLAY**, then type its password (steps 4 and 5 below).
 
-The easiest way to add a network is from the browser: open [`fw/web/wifi.html`](fw/web/wifi.html) in
-Chrome or Edge with the FM-1 plugged in, press **Connect to the FM-1**, type the network's name and
-password, and press **Save and join**.
+From a computer, with the FM-1 plugged in:
+`python3 base/tools/fm1_remote.py wifi join "NETWORK" "PASSWORD"`.
 
 On the FM-1 itself:
 
@@ -103,9 +94,9 @@ key deletes.
 
 The screen shows a small keyboard with what each key types.
 
-The FM-1 keeps six networks, newest first. With networks saved, it turns WiFi on at start and joins
-the first one it finds. To forget one, press **Forget** next to it on `wifi.html`, or use
-`python3 tools/wifi_ctl.py nets` and then `del N`.
+The FM-1 keeps six networks, the most recent first. With networks saved, it turns WiFi on at start and joins
+the first one it finds. To forget one, list them with `python3 base/tools/fm1_remote.py wifi saved`, then
+`wifi forget N`.
 
 ### Listening
 
@@ -175,26 +166,20 @@ quarter second, so below about 108 BPM the 1/8 stutter plays a 1/16 instead.
 
 ## Debugging over USB
 
-`fw/tools/wifi_ctl.py` talks to the FM-1 over USB-MIDI, even while the firmware waits on the network.
+`app/tools/radio_ctl.py` drives the radio over USB-MIDI:
 
 | Command | What it does |
 |---|---|
-| `status` | WiFi state, network, address and signal. |
-| `on`, `off` | WiFi on or off. |
-| `nets`, `add SSID PASS`, `del N`, `join N` | The saved networks. |
-| `dump` | The state, the last crash (kept through resets) and the log. |
-| `clear` | Forget the crash record. |
+| `dump` | The place, the station, the stream, the decoder and how often the main loop goes round. |
 | `radio` | As PLAY: play or stop. |
 | `turn K D` | As turning knob K+1 (0 to 3) by D. |
 | `fx N` | As holding white key N (1 to 16); `fx 0` lets go. |
 | `bpm N` | Set the tap tempo (41 to 167). |
 | `url URL` | Play the stream at URL, `http://` or `https://`, until the next tune. |
-
-`fw/tools/screenshot.py OUT.png [home|browse|wifi|help]` saves the screen as a PNG: the FM-1 redraws
-the page and sends it over USB as it draws, which pauses the audio for about a second. The pictures
-here were taken that way.
 | `rginfo` | The places built into the firmware. |
-| `reboot` | Restart. |
+
+fm1-base's `base/tools/fm1_remote.py` does the rest: WiFi (`wifi status`, `wifi join`, `wifi saved`...), the last
+crash and the radio's log (`log`), and the buttons, keys and knobs as a player would press and turn them.
 
 ## HTTPS and certificates
 
@@ -230,87 +215,33 @@ now free.
 
 ## Where the space goes
 
-The FM-1 has no external RAM, so WiFi has to fit in the chip's own memory beside the radio. The
-figures are from the build of October 2026, rounded, measured from the linked image's symbols. FoMni,
-a synth with no radio, is about 158 KB in all for comparison.
+The FM-1 has no external RAM, so WiFi has to fit in the chip's own memory beside the radio. The figures are from
+the build of October 2026 on fm1-base, rounded.
 
-### Flash: the 581 KB app slot
+- **Flash:** the image is 562 KB of the 581 KB app slot, 19 KB free. WiFi is about 299 KB of it (JieLi's driver
+  146 KB, the WPA supplicant 77 KB, lwIP 51 KB, the RF layer, crypto, the shim and its glue 25 KB), HTTPS (BearSSL
+  and the TLS glue) 36 KB, Radio Garden's places 78 KB, and the radio, minimp3, the pages, the fonts and the
+  platform the rest. The large font fm1-base draws its splash with is left out (`APP_BIG_FONT FONT_M`: 20 KB).
+- **RAM:** `.data` and `.bss` use 129.6 KB of 131 KB (fm1-base's WiFi memory map: 128 KB of RAM). WiFi's driver,
+  RF layer, lwIP and the shim's 14-task table are about 100 KB of it.
+- **The pool:** 307 KB of 311 KB: 13 task stacks of 8 KB (104 KB), the heap (144 KB), lwIP's packet buffers
+  (28 KB), the screen's drawing buffer (240 × 48 pixels, 23 KB).
 
-The image is 560 KB, which leaves about 22 KB free.
-
-| Part | Size |
-|---|---|
-| JieLi's WiFi driver (`wl_wifi_sta_sfc`) | 146 KB |
-| WPA supplicant | 77 KB |
-| lwIP (TCP/IP, built from the SDK's source) | 51 KB |
-| JieLi's RF layer and crypto, the shim and its WiFi glue | 25 KB |
-| **WiFi in all** | **about 299 KB** |
-| HTTPS: BearSSL's code (22 KB), its tables and the TLS glue | 36 KB |
-| Radio Garden's places (12,844 names, compressed by country) | 78 KB |
-| The radio, minimp3, UI, fonts, platform, the Radio Garden client and its decompressor | about 105 KB |
-
-### RAM: 128 KB of static data
-
-`.data` and `.bss` use 125 KB of the chip's 128 KB of RAM, leaving about 3 KB.
-
-| Part | Size |
-|---|---|
-| WiFi driver: its adapter (32 KB), transmit (20 KB) and receive (4 KB) buffers, and the rest | 61 KB |
-| RF layer | 3 KB |
-| lwIP | 6 KB |
-| The shim's task table: 14 tasks, each with a 2 KB message queue | 30 KB |
-| **WiFi in all** | **about 100 KB** |
-| The decoder's window for a stream that wraps round its buffer | 6 KB |
-| The platform and the radio: audio buffers, storage, USB, screen state | about 22 KB |
-
-### The pool: 304 KB of RAM for big buffers
-
-The pool has about 3 KB free.
-
-| Part | Size |
-|---|---|
-| Task stacks: 13 of 8 KB, for the WiFi, network and timer tasks | 104 KB |
-| The heap | 144 KB |
-| lwIP's packet buffers | 28 KB |
-| The screen's drawing buffer (240 × 48 pixels: rows are drawn 48 lines at a time) | 23 KB |
-
-The stream task uses 6 KB of its 8 KB stack during a TLS handshake, and about 2 KB otherwise.
-
-A separate 15 KB area keeps the crash record and the debug log through a restart. It also holds the
-TLS client's state (4.5 KB).
-
-While a station plays, the radio takes about 57 KB of the heap:
-
-- the stream buffer (20 KB);
-- the decoded audio (14 KB);
-- the effects' history (12 KB);
-- the decoder (11 KB).
-
-WiFi, WPA and lwIP take about 60 KB. An HTTPS stream adds its 16.7 KB record buffer. The heap peaks at
-about 138 of 144 KB on HTTPS, leaving about 9 KB of slack.
-
-### What this means
-
-- **WiFi is the bulk of the firmware:** about 300 KB of flash and, with its task stacks and heap, about
-  three quarters of the RAM. Getting there took the SDK's `_sfc` WiFi libraries (smaller buffers
-  than the default ones), a narrower screen buffer and a heap that takes nearly all of the pool.
-- **Flash is nearly full again:** about 22 KB, after BLE came out and the places went in. The data
-  flash area the old station table used (272 KB at 0x98000) is free, so the places could move there if
-  the code needs room.
-- **RAM has little:** new buffers need room found first. The candidates are fewer task stacks (most
-  tasks use under 4 KB of their 8) and a smaller stream buffer on HTTPS streams.
+While a station plays, the radio takes about 57 KB of the heap: the stream buffer (20 KB), the decoded audio
+(14 KB), the effects' history (12 KB) and the decoder (11 KB). WiFi, WPA and lwIP take about 60 KB, and an HTTPS
+stream adds its 16.7 KB record buffer. The heap peaks at about 138 of 144 KB on HTTPS.
 
 ## History
 
-The repository began as fm1-ble, which got JieLi's BLE stack running on a small cooperative OS shim
-inside a Felucca firmware, as BLE MIDI. The notes in `notes/` are from that work. The radio reuses the
-shim for JieLi's WiFi libraries. The BLE stack itself was taken out of the radio's build to make room;
-`fw/firmware/src/app/ble.c` keeps it behind `SHIM_NO_BLE`, and fm1-ble has the working BLE MIDI.
+The repository began as fm1-ble, which got JieLi's BLE stack running on a small cooperative OS shim inside a
+Felucca firmware, as BLE MIDI. The notes in `notes/` are from that work. The radio then reused the shim for JieLi's
+WiFi libraries. In October 2026 the shim, the WiFi glue and the platform moved into fm1-base, and Radio became an
+app on it (`app/`), under MPL-2.0.
 
 ## Credits
 
-- [Felucca](https://github.com/hugelton/Felucca) by Hügelton Instruments: the platform layer
-  (GPL-3.0-only).
+- [fm1-base](https://github.com/charlesvestal/fm1-base), from [Felucca](https://github.com/hugelton/Felucca) by
+  Leo Kuroshita (Hügelton Instruments): the platform (MPL-2.0, with his permission).
 - [minimp3](https://github.com/lieff/minimp3) by lieff: the MP3 decoder (CC0).
 - [BearSSL](https://www.bearssl.org) by Thomas Pornin: the TLS client (MIT).
 - The JieLi AC79 SDK (Apache-2.0): the WiFi libraries, lwIP and the radio's tuning constants.
