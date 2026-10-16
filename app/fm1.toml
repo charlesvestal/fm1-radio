@@ -16,5 +16,3 @@ net_include = ["third_party/bearssl/inc", "third_party/bearssl/src"]
 net_cflags = ["-DBR_USE_UNIX_TIME=0", "-DBR_USE_WIN32_TIME=0", "-DBR_USE_URANDOM=0", "-DBR_USE_GETENTROPY=0",
               "-DBR_USE_WIN32_RAND=0", "-DBR_RDRAND=0", "-DBR_AES_X86NI=0", "-DBR_SSE2=0", "-DBR_POWER8=0",
               "-DBR_64=0", "-DBR_INT128=0", "-DBR_UMUL128=0", "-DBR_LE_UNALIGNED=0", "-DBR_BE_UNALIGNED=0"]
-# Radio Garden's places, packed into the image (fetched once into build/rg/places.json)
-gen = ["tools/rg_places.py --c-out {gen}/rg_places_data.h"]

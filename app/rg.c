@@ -1,15 +1,18 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Charles Vestal */
-/* Radio Garden's places, as tools/rg_places.py packs them into the image (build/gen/rg_places_data.h, made by
- * the build), read in place. The place names, compressed a country at a time, are unpacked as they are
- * needed (inflate.c). Layout (little-endian), see rg_places.py:
+/* Radio Garden's places, as the FM-1 fetches them itself (places.c) into the flash's data area, read in place
+ * (fm1-base plat_data). The place names, a country at a time, are unpacked as they are needed (inflate.c).
+ * Layout (little-endian), as tools/rg_places.py writes it too (for the host simulator):
  *   header 64 B: magic "RGP1", version, continents, countries, places, the offsets, total, CRC-32 of
  *   [64, total), created; continents {name, first country, countries} 8 B; countries {name, block offset,
  *   block length, places, continent} 16 B; NUL-terminated ASCII strings; the blocks: a country's names,
- *   sorted, front coded (shared length, the rest, NUL), raw deflate in a 1 KB window.
+ *   sorted, front coded (shared length, the rest, NUL), raw deflate (rg_places.py: in a 1 KB window; places.c:
+ *   stored, as the FM-1 has no compressor).
  * Part of the app's unity build (app.c). */
-#include "rg_places_data.h"
 #define RG_MAGIC 0x31504752u                      /* "RGP1" */
+#define RG_OFF PLAT_DATA_LO                       /* where it is: places.c RGP_OFF */
+#define RG_MAX (0xD8000u - PLAT_DATA_LO)          /* .. OBJ_RADIO's sectors */
+static uint32_t pl_crc(const uint8_t *p, uint32_t n);
 
 typedef struct {
     uint32_t magic;
@@ -22,10 +25,11 @@ typedef struct { uint32_t name, block, len; uint16_t n; uint8_t cont, rsv; } rg_
 
 static const rg_hdr_t *rg;                        /* the table, or 0 */
 
-static void rg_open(void)
+static void rg_open(void)                         /* the table, if one is whole there (its CRC checked) */
 {
-    const rg_hdr_t *h = (const rg_hdr_t *)RG_PLACES;
-    rg = h->magic == RG_MAGIC && h->total == sizeof RG_PLACES ? h : 0;
+    const rg_hdr_t *h = (const rg_hdr_t *)plat_data(RG_OFF);
+    rg = h && h->magic == RG_MAGIC && h->total > 64u && h->total <= RG_MAX &&
+         pl_crc((const uint8_t *)h + 64, h->total - 64u) == h->crc ? h : 0;
 }
 
 static const char *rg_str(uint32_t off) { return (const char *)rg + rg->off_str + off; }
@@ -76,7 +80,7 @@ static int rg_names(uint32_t country, uint32_t first, uint32_t n, void (*name)(u
     r.last = first + n - 1u;
     r.name = name;
     r.ctx = ctx;
-    return inflate_mem(RG_PLACES + c->block, c->len, rg_names_byte, &r);
+    return inflate_mem((const uint8_t *)rg + c->block, c->len, rg_names_byte, &r);
 }
 static void rg_name_one(uint32_t i, const char *s, void *ctx) { (void)i; w_cpy(ctx, s, 32); }
 static int rg_place_name(uint32_t country, uint32_t i, char out[32])   /* one place's name */

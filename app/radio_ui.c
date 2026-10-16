@@ -262,8 +262,14 @@ static void ui_home(void)
     else
         w_cpy(hint, wifi_st == WS_OFF ? "WiFi off" : wifi_st == WS_FAILED ? "no WiFi" : "WiFi ...", sizeof hint);
     ui_title(0, "Radio", hint);
-    if (!sel_valid())                             /* the built-in table is always there (rg.c) */
+    if (!sel_valid()) {                           /* no places yet: Radio Garden's, being fetched (places.c) */
+        char st[48];
+        ui_text_big(1, 42, "Getting the places", K_TEXT);
+        ui_row(2, 74, 22, "from Radio Garden: only this once", "", K_DIM, K_DIM, K_BG);
+        ui_row(3, 96, 22, places_status(st, sizeof st) ? st : "", "", K_TEAL, K_DIM, K_BG);
+        ui_row(13, 214, 26, "GLO wifi", "", K_DIM, K_DIM, K_PANEL);
         return;
+    }
     sc = radio_st == RS_PLAYING ? K_TEAL : radio_st == RS_ERROR ? K_CORAL : K_TEXT;
     ui_text_big(1, 42, st_title[0] ? st_title : fetch_busy || fetch_want ? "Finding stations" : "Choose a station",
                 tune_want ? K_CORAL : st_title[0] ? sc : K_DIM);

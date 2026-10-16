@@ -395,7 +395,9 @@ static void ui_pass(void)
     ui_row(13, 214, 26, "PLAY  save + join", "HOME  cancel", K_DIM, K_DIM, K_PANEL);
 }
 
+static const char *places_status(char *b, unsigned max);   /* places.c */
 #include "radio_ui.c"
+#include "places.c"
 
 static void ui_draw(void)
 {
@@ -491,6 +493,9 @@ int app_sysex(const uint8_t *p, uint32_t n)
             url_restart = 1;                      /* the main loop restarts the stream on it */
         }
         break;
+    case 0x54:                                    /* the places fetched again */
+        wire_cmd = 0x54;
+        break;
     case 0x53:
         if (rg) {
             char lb[64];
@@ -524,6 +529,7 @@ static void wire_actions(void)
         break;
     case 0x47: fx_wire = wire_arg && wire_arg <= FX_N ? 1u << (wire_arg - 1u) : 0u; break;
     case 0x48: tempo_set(60000u / (wire_arg ? wire_arg + 40u : 120u), plat_ms()); break;
+    case 0x54: places_refresh(); break;
     default: break;
     }
 }
@@ -737,6 +743,7 @@ void app_loop(void)
         if (radio_st != RS_OFF)
             radio_stop();                         /* radio_ui_service starts it again (the station is unchanged) */
     }
+    places_poll();                                /* no places yet: fetched from Radio Garden (places.c) */
     radio_ui_service();
     if (wifi_st != WS_CONNECTED && radio_mode != 2 && radio_st != RS_OFF && radio_st != RS_ERROR)
         radio_stop();                             /* the network went: so does the stream */
@@ -766,6 +773,23 @@ int rgn_start(const char *place, const char *country)
     (void)place, (void)country;
     rgn_n = 2;
     rgn_state = RGN_DONE;
+    return 0;
+}
+/* Radio Garden's places: a few, in no order, as the list has them (and a country no continent knows) */
+volatile int rgp_state;
+volatile uint32_t rgp_bytes;
+char rgp_why[32];
+int rgp_start(void (*cb)(const char *title, const char *country))
+{
+    static const char *const P[][2] = {
+        {"Utrecht", "Netherlands"}, {"Adrar", "Algeria"}, {"Amsterdam", "Netherlands"}, {"  Rotterdam ", "Netherlands"},
+        {"Oran", "Algeria"}, {"Amsterdam", "Netherlands"}, {"Pago Pago", "American Samoa"}, {"zwolle", "Netherlands"},
+        {"Lost City", "Atlantis"}, {"Brisbane", "Australia"}, {"Adelaide", "Australia"}, {"Algiers", "Algeria"}};
+    unsigned i;
+    for (i = 0; i < sizeof P / sizeof P[0]; i++)
+        cb(P[i][0], P[i][1]);
+    rgp_bytes += 1900u * 1024u;
+    rgp_state = 2;                                /* RGP_DONE */
     return 0;
 }
 #endif

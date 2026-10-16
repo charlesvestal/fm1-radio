@@ -497,6 +497,7 @@ typedef struct {
     char url[JS_DEPTH][40], title[JS_DEPTH][32], sub[JS_DEPTH][32];
     int (*obj)(void *, const char *url, const char *title, const char *sub);   /* nonzero: stop */
     void *ctx;
+    uint8_t country;                              /* "country" read as the subtitle (the places' list) */
 } js_t;
 
 static void js_char(js_t *j, uint32_t cp)        /* a character of the string being read */
@@ -550,7 +551,7 @@ static int js_feed(js_t *j, const uint8_t *p, unsigned n)   /* nonzero: the call
                         js_put(j->url[d], sizeof j->url[d], j->val, j->vlen);
                     else if (!strcmp(j->key, "title"))
                         js_put(j->title[d], sizeof j->title[d], j->val, j->vlen);
-                    else if (!strcmp(j->key, "subtitle"))
+                    else if (!strcmp(j->key, j->country ? "country" : "subtitle"))
                         js_put(j->sub[d], sizeof j->sub[d], j->val, j->vlen);
                 }
             } else if (j->utf_left) {             /* UTF-8 continuation */
@@ -672,25 +673,39 @@ static int url_add(char *d, unsigned max, const char *s)   /* s appended, as a q
     return 0;
 }
 
-/* GET rgn_url and run its JSON through the reader */
-static int rgn_get(js_t *j)
+/* GET url and run its JSON through the reader (bytes: counted as they arrive, if given) */
+static int js_get(js_t *j, char *url, unsigned url_max, char *why, volatile uint32_t *bytes)
 {
-    conn_t c = {-1, 0, 0, rgn_why};
+    conn_t c = {-1, 0, 0, why};
     uint8_t b[256];
     int rc, tries, got;
     for (tries = 0; tries < 3; tries++) {
-        rc = http_open(&c, rgn_url, sizeof rgn_url, 1);
+        rc = http_open(&c, url, url_max, 1);
         if (rc != 1)
             break;
     }
     if (rc != 0)
         return -1;
-    while ((got = conn_read(&c, b, sizeof b)) > 0)
-        if (js_feed(j, b, (unsigned)got))
-            break;
+    {
+        uint32_t t0 = shim_ms(), n = 0;
+        while ((got = conn_read(&c, b, sizeof b)) > 0) {
+            if (bytes) {                          /* a long download, paced at ~48 KB/s: flat out, the receiver
+                                                   * corrupted records (tls error 7) and the link dropped */
+                *bytes += (uint32_t)got;
+                n += (uint32_t)got;
+                while (n > (shim_ms() - t0) * 48u)
+                    os_time_dly(1);
+            }
+            if (js_feed(j, b, (unsigned)got))
+                break;
+        }
+    }
     conn_close(&c);
+    if (got < 0 && !why[0])
+        why_to(why, "connection lost");
     return got < 0 ? -1 : 0;
 }
+static int rgn_get(js_t *j) { return js_get(j, rgn_url, sizeof rgn_url, rgn_why, 0); }
 
 static void rgn_task(void *arg)
 {
@@ -747,6 +762,59 @@ int rgn_start(const char *place, const char *country)
     if (task_create(rgn_task, 0, "rgfetch")) {
         rgn_state = RGN_ERROR;
         why_to(rgn_why, "no task");
+        return -1;
+    }
+    return 0;
+}
+
+/* ---- Radio Garden: every place, for the table the FM-1 builds itself (app/places.c): each one handed to the
+ * app's callback (its name and country, folded to ASCII) as the list streams in, about 1.9 MB */
+enum { RGP_IDLE, RGP_BUSY, RGP_DONE, RGP_ERROR };
+volatile int rgp_state;
+volatile uint32_t rgp_bytes;                      /* received so far */
+char rgp_why[32];
+static char rgp_url[64];
+static void (*rgp_cb)(const char *title, const char *country);
+static int on_any_place(void *ctx, const char *u, const char *title, const char *country)
+{
+    (void)ctx;
+    if (!strncmp(u, "/visit/", 7) && title[0] && country[0])
+        rgp_cb(title, country);
+    return 0;
+}
+static void rgp_task(void *arg)
+{
+    js_t *j = malloc(sizeof *j);
+    (void)arg;
+    if (!j) {
+        why_to(rgp_why, "no memory");
+        rgp_state = RGP_ERROR;
+        return;
+    }
+    memset(j, 0, sizeof *j);
+    j->obj = on_any_place;
+    j->country = 1;
+    strcpy(rgp_url, "https://radio.garden/api/ara/content/places");
+    rgp_state = js_get(j, rgp_url, sizeof rgp_url, rgp_why, &rgp_bytes) ? RGP_ERROR : RGP_DONE;
+    {
+        char b[40];
+        snprintf(b, sizeof b, "places: %u KB %s", (unsigned)(rgp_bytes / 1024u), rgp_state == RGP_DONE ? "read" : "then lost");
+        shim_log(b);
+    }
+    free(j);
+}
+/* the app's: fetch the list, cb(title, country) for each place (in this task: the app only copies); 0 = started */
+int rgp_start(void (*cb)(const char *title, const char *country))
+{
+    if (rgp_state == RGP_BUSY)
+        return -1;
+    rgp_cb = cb;
+    rgp_bytes = 0;
+    rgp_why[0] = 0;
+    rgp_state = RGP_BUSY;
+    if (task_create(rgp_task, 0, "rgplaces")) {
+        rgp_state = RGP_ERROR;
+        why_to(rgp_why, "no task");
         return -1;
     }
     return 0;
