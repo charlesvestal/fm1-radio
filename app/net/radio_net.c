@@ -442,7 +442,15 @@ int radio_net_start(const char *u, uint8_t *buf, uint32_t size)
     radio_rd = radio_wr = 0;
     radio_net_why[0] = 0;
     stop_req = 0;
-    return task_create(radio_task, 0, "radio");
+    radio_net_state = RN_CONNECTING;              /* now, not when the task first runs: the last stream's state (an */
+    running = 1;                                  /* unplayable one) was read meanwhile, with no reason: ": turn K4" */
+    if (task_create(radio_task, 0, "radio")) {
+        running = 0;
+        radio_net_state = RN_ERROR;
+        why_to(radio_net_why, "no task");
+        return -1;
+    }
+    return 0;
 }
 /* ask the task to stop; it ends after its current recv */
 void radio_net_stop(void) { stop_req = 1; }
