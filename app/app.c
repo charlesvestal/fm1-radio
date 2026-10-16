@@ -440,6 +440,15 @@ static void wire_dump(void)
     snprintf(b, sizeof b, "up %u ms  wifi %s  loops %u", (unsigned)plat_ms(), wifi_status_str(), (unsigned)main_loops);
     wire_line(b);
     radio_ui_dump();
+#ifndef PLAT_HOST
+    {
+        extern uint32_t shim_heap_used, shim_heap_peak;
+        extern const uint32_t shim_heap_size;
+        snprintf(b, sizeof b, "heap %u used, %u peak, of %u", (unsigned)shim_heap_used, (unsigned)shim_heap_peak,
+                 (unsigned)shim_heap_size);
+        wire_line(b);
+    }
+#endif
     snprintf(b, sizeof b, "radio %s  net %d  buf %u/%u  pcm %u  fr %u  %uHz %ukbps", radio_status_str(),
              radio_net_state, (unsigned)(radio_wr - radio_rd), (unsigned)NET_RING, (unsigned)(pcm_w - pcm_r),
              (unsigned)radio_frames, (unsigned)radio_hz, (unsigned)radio_kbps);
