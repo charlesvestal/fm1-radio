@@ -250,7 +250,7 @@ static void ui_status(void)
             w_cpy(nm, radio_why, sizeof nm);
         else
             w_cpy(nm, radio_status_str(), sizeof nm);
-        ui_row(5, 152, 26, "Radio", nm, K_DIM, rc, K_BG);
+        ui_row(5, 152, 26, "Stream", nm, K_DIM, rc, K_BG);
     }
     ui_row(13, 214, 26, wifi_st == WS_OFF ? "PLAY wifi on  SEL networks" : "PLAY wifi off  SEL networks",
            "HOME", K_DIM, K_DIM, K_PANEL);
