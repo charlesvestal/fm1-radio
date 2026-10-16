@@ -119,9 +119,10 @@ two: the FM-1 asks Radio Garden for its stations (up to 100, as Radio Garden ord
 first. The screen shows the station, its place and country, and whether it is playing or buffering. A
 station that drops out is reconnected by itself.
 
-Some stations can't play. About a third of Radio Garden's stations send AAC, which the FM-1 can't decode,
-and some are offline. The screen says so ("can't play AAC", "station offline"): turn **KNOB 4** to the
-next one.
+The FM-1 plays MP3 and AAC streams. Many AAC stations send HE-AAC ("AAC+"), which the FM-1 plays as its
+AAC core: at half the sample rate, so duller than the station meant. A few stations can't play at all (HLS, AAC in
+an MP4 container, Ogg), and some are offline. The screen says so ("can't play HLS", "station offline"): turn
+**KNOB 4** to the next one.
 
 ![The controls, shown while HOME is held](docs/img/help.png)
 
@@ -204,8 +205,8 @@ now free.
 
 ## Known limits
 
-- 2.4 GHz WiFi only. MP3 streams only: no AAC or HLS, about a third of Radio Garden's stations. An AAC
-  decoder would need more flash and RAM than are left.
+- 2.4 GHz WiFi only. MP3 and AAC streams; HE-AAC plays as its AAC core (its SBR would need about 35 KB more
+  RAM than is left), and HLS, MP4 and Ogg streams don't play.
 - A place shows up to 100 stations.
 - Server certificates aren't checked (see above).
 - The core voltage is raised to 1.50 V at start (the SDK uses 1.45 V at this clock). At 1.40 V, flash
@@ -244,6 +245,7 @@ app on it (`app/`), under MPL-2.0.
 - [fm1-base](https://github.com/charlesvestal/fm1-base), from [Felucca](https://github.com/hugelton/Felucca) by
   Leo Kuroshita (Hügelton Instruments): the platform (MPL-2.0, with his permission).
 - [minimp3](https://github.com/lieff/minimp3) by lieff: the MP3 decoder (CC0).
+- PacketVideo's AAC decoder, from Android 4.1.2 (Apache-2.0): the AAC decoder.
 - [BearSSL](https://www.bearssl.org) by Thomas Pornin: the TLS client (MIT).
 - The JieLi AC79 SDK (Apache-2.0): the WiFi libraries, lwIP and the radio's tuning constants.
 - [Radio Garden](https://radio.garden): the stations. Radio Garden isn't affiliated with this
