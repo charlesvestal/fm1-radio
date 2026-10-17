@@ -110,7 +110,8 @@ extern "C"
 
 #if CHECK_INPUT_BUFFER_LIMITS
 
-        offset =  pInputStream->inputBufferCurrentLength - offset;
+        offset = pInputStream->inputBufferCurrentLength > offset ?        /* fm1-radio: 0 past the end (it wrapped) */
+                 pInputStream->inputBufferCurrentLength - offset : 0;
         /*  check if access to input buffer does not go beyond boundaries */
         if (offset > 3)
         {
@@ -218,7 +219,8 @@ extern "C"
 #if CHECK_INPUT_BUFFER_LIMITS
 
 
-        offset =  pInputStream->inputBufferCurrentLength - offset;
+        offset = pInputStream->inputBufferCurrentLength > offset ?        /* fm1-radio: 0 past the end (it wrapped) */
+                 pInputStream->inputBufferCurrentLength - offset : 0;
         /*  check if access to input buffer does not go beyond boundaries */
         if (offset > 1)
         {
@@ -281,7 +283,8 @@ extern "C"
 
 #if CHECK_INPUT_BUFFER_LIMITS
 
-        offset =  pInputStream->inputBufferCurrentLength - offset;
+        offset = pInputStream->inputBufferCurrentLength > offset ?        /* fm1-radio: 0 past the end (it wrapped) */
+                 pInputStream->inputBufferCurrentLength - offset : 0;
         /*  check if access to input buffer does not go beyond boundaries */
 
         if (offset > 2)

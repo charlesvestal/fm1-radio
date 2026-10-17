@@ -1,4 +1,24 @@
 PacketVideo's AAC decoder (AAC-LC, HE-AAC: SBR, PS), as in Android 4.1.2
 (https://android.googlesource.com/platform/frameworks/av/+/android-4.1.2_r1/media/libstagefright/codecs/aacdec),
 Apache-2.0 (NOTICE). Android's wrappers (SoftAAC.cpp, AACDecoder.cpp) left out; the .cpp files renamed .c and
-built as C with pv_fm1.h; get_audio_specific_config.c changed in one line (a C cast), marked "fm1-radio".
+built as C with pv_fm1.h. Built with AAC_PLUS (SBR), without HQ_SBR and PARAMETRICSTEREO (app/fm1.toml).
+
+Changed by fm1-radio, each change marked "fm1-radio". Most are checks on values a damaged frame brings, which the
+decoder trusted: app/tools/aac_fuzz.c found them, and with them it decodes damaged streams without reading or
+writing outside its memory. On a good stream the output is the same as before, sample for sample.
+
+  get_audio_specific_config.c  a C cast
+  getbits.h                    the bytes left, 0 once past the end (it wrapped, and the reads went far past the input)
+  get_adts_header.c            sampling rates 12-15 refused (reserved: samp_rate_info has 12)
+  get_tns.c                    a filter's start band at least 0 (it wrote before the spectrum)
+  pulse_nc.c                   pulses within the frame's bands and the spectrum (they wrote past it)
+  extractframeinfo.c           at most 4 (FIXFIX) or 5 (VARVAR) SBR envelopes, bs_pointer in range (it wrote past
+                               its stack arrays)
+  sbr_crc_check.c              an SBR element too short for a CRC fails it (the count, unsigned, came out huge: a
+                               read through all of memory, or the watchdog)
+  sbr_update_freq_scale.c      band counts within the tables (it wrote past them, and before its stack array)
+  sbr_reset_dec.c              the bands checked before they are kept
+  sbr_read_data.c              a stereo element's reset error kept (sbr_get_cpe hid it: SBR then ran on bad bands)
+  sbr_applied.c                both channels to upsampling after a read error (eleChannels was not set yet)
+  sbr_dec.c                    SBR only on band tables that agree with each other (upsampling otherwise)
+  sbr_generate_high_freq.c     at most MAX_NUM_PATCHES patches, and the patch loop ends (it could go round forever)

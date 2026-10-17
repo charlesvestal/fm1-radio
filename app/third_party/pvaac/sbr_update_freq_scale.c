@@ -92,6 +92,7 @@ Copyright (c) ISO/IEC 2002.
 #include    "pv_log2.h"
 
 #include "fxp_mul32.h"
+#include "sbr_constants.h"      /* fm1-radio: MAX_FREQ_COEFFS */
 #define R_SHIFT     30
 #define Q_fmt(x)    (Int32)(x*((Int32)1<<R_SHIFT) + (x>=0?0.5F:-0.5F))
 #define Q28fmt(x)   (Int32)(x*((Int32)1<<28) + (x>=0?0.5F:-0.5F))
@@ -167,6 +168,12 @@ void sbr_update_freq_scale(Int32 * v_k_master,
 
         w[1]  = (alterScale == 0) ? Q_fmt(0.5f) : Q_fmt(0.384615384615386f);
 
+        if (lsbM < 1 || usb <= lsbM)    /* fm1-radio: (a division by lsbM below) */
+        {
+            *h_num_bands = 0;
+            return;
+        }
+
         if (usb > fxp_mul32_Q28(lsbM, Q28fmt(2.2449)))
         {
             regions = 2;
@@ -190,6 +197,12 @@ void sbr_update_freq_scale(Int32 * v_k_master,
 
                 numBands = tmp_q1 << 1;
 
+                if (numBands < 1 || numBands > MAX_SECOND_REGION || numBands > MAX_FREQ_COEFFS)
+                {
+                    *h_num_bands = 0;       /* fm1-radio: no table (past d[], v_k_master[]: sbr_reset_dec refuses it) */
+                    return;
+                }
+
 
                 CalcBands(d, k[0], k[1], numBands);                                    /* CalcBands => d   */
                 shellsort(d, numBands);                                              /* SortBands sort d */
@@ -209,6 +222,12 @@ void sbr_update_freq_scale(Int32 * v_k_master,
                 tmp_q1 = (tmp_q1 + 16) >> 5;
 
                 numBands2 = tmp_q1 << 1;
+
+                if (numBands2 < 1 || numBands2 > MAX_SECOND_REGION || *h_num_bands + numBands2 > MAX_FREQ_COEFFS)
+                {
+                    *h_num_bands = 0;       /* fm1-radio: as above */
+                    return;
+                }
 
                 CalcBands(d2, k[reg], k[reg+1], numBands2);                            /* CalcBands => d   */
                 shellsort(d2, numBands2);                                              /* SortBands sort d */
@@ -264,6 +283,12 @@ void sbr_update_freq_scale(Int32 * v_k_master,
 
         k2_diff = usb - k2_achived;
 
+        if (numBands <= 0 || numBands > MAX_FREQ_COEFFS)   /* fm1-radio: no table (sbr_reset_dec refuses it) */
+        {
+            *h_num_bands = 0;
+            return;
+        }
+
         for (i = 0; i < numBands; i++)
         {
             diff_tot[i] = dk;
@@ -282,7 +307,7 @@ void sbr_update_freq_scale(Int32 * v_k_master,
         }
 
         /* Adjust diff vector to get spec. SBR range */
-        while (k2_diff != 0)
+        while (k2_diff != 0 && i >= 0 && i < numBands)   /* fm1-radio: within diff_tot (it walked out) */
         {
             diff_tot[i] -=  incr;
             i += incr;

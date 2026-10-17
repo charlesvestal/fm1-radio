@@ -211,6 +211,7 @@ void sbr_generate_high_freq(Int32 sourceBufferReal[][32],
 {
     Int32    i;
     Int32    patch;
+    Int32    fm1_turns;      /* fm1-radio */
     Int32    startSample;
     Int32    stopSample;
     Int32    goalSb;
@@ -345,12 +346,18 @@ void sbr_generate_high_freq(Int32 sourceBufferReal[][32],
 
     /* even (odd) numbered channel must be patched to even (odd) numbered channel */
     patch = 0;
+    fm1_turns = 0;
 
 
     sbrStartFreqOffset = targetStopBand;
 
     while (targetStopBand < usb)
     {
+        if (patch >= MAX_NUM_PATCHES || ++fm1_turns > 2 * MAX_NUM_PATCHES)
+        {
+            break;      /* fm1-radio: damaged tables (past targetStartBand[], or around forever: the watchdog) */
+        }
+
         Patch->targetStartBand[patch] = targetStopBand;
 
         numBandsInPatch = goalSb - targetStopBand;                   /* get the desired range of the patch */

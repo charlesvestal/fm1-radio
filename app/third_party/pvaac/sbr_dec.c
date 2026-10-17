@@ -139,6 +139,34 @@ Copyright (c) ISO/IEC 2002.
 ; FUNCTION CODE
 ----------------------------------------------------------------------------*/
 
+/* fm1-radio: the band tables agree with each other and with lowSubband (a damaged header can leave them apart:
+ * calc_sbr_envelope then wrote outside its arrays), or are still as init_sbr_dec left them (no header yet) */
+static int sbr_tables_ok(const SBR_DEC *d, const SBR_FRAME_DATA *f)
+{
+    Int32 r, i;
+    if (!d->NSfb[LO] && !d->NSfb[HI] && !f->nSfb[LO] && !f->nSfb[HI])
+        return d->lowSubband <= 32;
+    if (d->lowSubband < 1 || d->lowSubband > 32 || d->highSubband > 64 || d->highSubband <= d->lowSubband)
+        return 0;
+    for (r = 0; r < 2; r++)
+    {
+        if (d->NSfb[r] < 1 || d->NSfb[r] > MAX_FREQ_COEFFS || f->nSfb[r] != d->NSfb[r] ||
+            d->FreqBandTable[r][0] != d->lowSubband || d->FreqBandTable[r][d->NSfb[r]] != d->highSubband)
+            return 0;
+        for (i = 0; i < d->NSfb[r]; i++)
+            if (d->FreqBandTable[r][i] >= d->FreqBandTable[r][i + 1])
+                return 0;
+    }
+    if (d->NoNoiseBands < 1 || d->NoNoiseBands > MAX_NOISE_COEFFS || f->nNfb != d->NoNoiseBands)
+        return 0;
+    for (i = 0; i <= d->NoNoiseBands; i++)
+        if (d->FreqBandTableNoise[i] < d->lowSubband || d->FreqBandTableNoise[i] > d->highSubband)
+            return 0;
+    if (f->frameInfo[0] < 1 || f->frameInfo[0] > MAX_ENVELOPES)
+        return 0;
+    return 1;
+}
+
 void sbr_dec(Int16 *inPcmData,
              Int16 *ftimeOutPtr,
              SBR_FRAME_DATA * hFrameData,
@@ -184,6 +212,11 @@ void sbr_dec(Int16 *inPcmData,
     int32_t *ptr_tmp2;
     scratch_mem = pVars->scratch.scratch_mem;
 
+
+    if (applyProcessing && !sbr_tables_ok(sbrDec, hFrameData))
+    {
+        applyProcessing = 0;            /* fm1-radio: upsample only, this frame */
+    }
 
     if (applyProcessing)
     {

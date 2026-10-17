@@ -237,6 +237,11 @@ void pulse_nc(
 
     /*--- Find the scalefactor band where pulse-encoded data starts ---*/
 
+    if (pPulseInfo->pulse_start_sfb > pLongFrameInfo->sfb_per_win[0])   /* fm1-radio: a damaged start band */
+    {
+        return;
+    }
+
     if (pPulseInfo->pulse_start_sfb > 0)
     {
         index = pLongFrameInfo->win_sfb_top[0][pPulseInfo->pulse_start_sfb - 1];
@@ -269,6 +274,11 @@ void pulse_nc(
     for (index = pPulseInfo->number_pulse; index > 0; index--)
     {
         pCoef  += *pPulseOffset++;
+
+        if (pCoef >= &coef[1024])       /* fm1-radio: past the spectrum (a damaged offset) */
+        {
+            break;
+        }
 
         temp = *pCoef;
 

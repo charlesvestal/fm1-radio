@@ -159,6 +159,11 @@ Int32 sbr_crc_check(BIT_BUFFER * hBitBuf, UInt32 NrBits)
     BitBufferCRC.bufferLen      = hBitBuf->bufferLen;
 
 
+    if ((Int32)NrBits <= 0 || (Int32)BitBufferCRC.bufferLen <= (Int32)BitBufferCRC.nrBitsRead)
+    {
+        return 0;       /* fm1-radio: no bits to check (a 1-byte element: NrCrcBits, unsigned, came out huge) */
+    }
+
     NrCrcBits = min(NrBits, BitBufferCRC.bufferLen - BitBufferCRC.nrBitsRead);
 
 

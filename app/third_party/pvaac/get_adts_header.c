@@ -437,6 +437,10 @@ Int get_adts_header(
          * see Ref #1 for their interpretation.
          */
         pVars->prog_config.sampling_rate_idx = (lower_16 >> 6) & 0xF;
+        if (pVars->prog_config.sampling_rate_idx > 11)   /* fm1-radio: 12-15 are reserved (samp_rate_info has 12) */
+        {
+            status = 1;
+        }
 
         /*
          * private_bit is a bit for private use.  ISO/IEC will not make

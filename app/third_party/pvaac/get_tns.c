@@ -458,6 +458,10 @@ void get_tns(
 
                 top -= get9_n_lessbits(num_start_band_bits,
                                        pInputStream);
+                if (top < 0)    /* fm1-radio: a damaged length (a negative start band wrote before the spectrum) */
+                {
+                    top = 0;
+                }
 
                 tempInt = MINIMUM(top, tns_bands);
 

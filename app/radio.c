@@ -114,6 +114,16 @@ static void dec_drop(void)
     aac_out = 0;
     dec_kind = 0;
 }
+/* the AAC decoder, as new: after every bad frame too, as the one call that left its state broken (a damaged
+ * frame's settings kept: the frames after it failed, or worse) */
+static int aac_reset(void)
+{
+    memset(aac_ext, 0, sizeof *aac_ext);
+    aac_ext->outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
+    aac_ext->desiredChannels = 2;
+    aac_ext->aacPlusEnabled = 0;              /* (built without SBR: an HE-AAC stream plays its AAC core) */
+    return PVMP4AudioDecoderInitLibrary(aac_ext, aac_mem) ? -1 : 0;
+}
 static int dec_use(uint8_t kind)                  /* 0 = ready */
 {
     if (kind == dec_kind)
@@ -129,17 +139,14 @@ static int dec_use(uint8_t kind)                  /* 0 = ready */
         mp3dec_init(mp3);
     } else {
         aac_ext = malloc(sizeof *aac_ext);
-        aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements());
+        aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements() + 8u);   /* (SBR's bit reader reads ahead 3 bytes past
+                                                                           * its data, at the end of this) */
         aac_out = malloc(2048u * sizeof *aac_out);
         if (!aac_ext || !aac_mem || !aac_out) {
             dec_drop();
             return -1;
         }
-        memset(aac_ext, 0, sizeof *aac_ext);
-        aac_ext->outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
-        aac_ext->desiredChannels = 2;
-        aac_ext->aacPlusEnabled = 0;              /* (built without SBR: an HE-AAC stream plays its AAC core) */
-        if (PVMP4AudioDecoderInitLibrary(aac_ext, aac_mem)) {
+        if (aac_reset()) {
             dec_drop();
             return -1;
         }
@@ -339,6 +346,7 @@ static void radio_poll(void)
             if (err != MP4AUDEC_SUCCESS) {        /* a bad frame: past it (or a byte), the decoder finds sync */
                 radio_rd += aac_ext->inputBufferUsedLength > 0 ? (uint32_t)aac_ext->inputBufferUsedLength : 1u;
                 radio_aac_errs++;
+                aac_reset();
                 continue;
             }
             radio_rd += (uint32_t)aac_ext->inputBufferUsedLength;

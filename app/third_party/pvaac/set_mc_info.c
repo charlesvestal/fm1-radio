@@ -289,11 +289,11 @@ Int set_mc_info(
      * set the channel counts
      * save tag for left channel
      */
-    pMC_Info->nch   = 1 + is_cpe;
+    pMC_Info->nch   = is_cpe ? 2 : 1;      /* fm1-radio: was 1 + is_cpe (a damaged one made 3 channels, of 2) */
 
     pCh_Info = &pMC_Info->ch_info[0];
     pCh_Info->tag = tag;
-    pCh_Info->cpe = is_cpe;
+    pCh_Info->cpe = is_cpe != 0;
 
     /* This if branch maybe deleted in the future */
     if (is_cpe != FALSE)

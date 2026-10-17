@@ -176,6 +176,11 @@ SBR_ERROR sbr_reset_dec(SBR_FRAME_DATA * hFrameData,
 
     sbrDec->NSfb[HI] = sbrDec->Num_Master - headerData->xover_band;
 
+    if (sbrDec->NSfb[HI] <= 0 || sbrDec->Num_Master > MAX_FREQ_COEFFS)   /* fm1-radio: a damaged xover_band */
+    {
+        return SBRDEC_ILLEGAL_SCFACTORS;
+    }
+
     for (i = headerData->xover_band; i <= sbrDec->Num_Master; i++)
     {
         sbrDec->FreqBandTable[HI][i-headerData->xover_band] = (Int)sbrDec->V_k_master[i];
@@ -208,14 +213,14 @@ SBR_ERROR sbr_reset_dec(SBR_FRAME_DATA * hFrameData,
     lsb = sbrDec->FreqBandTable[LOW_RES][0];
     usb = sbrDec->FreqBandTable[LOW_RES][sbrDec->NSfb[LOW_RES]];
 
-    sbrDec->lowSubband  = lsb;
-    sbrDec->highSubband = usb;
-    sbrDec->noSubbands  = usb - lsb;
-
-    if ((lsb > 32) || (sbrDec->noSubbands <= 0))
+    if ((lsb > 32) || (usb > 64) || (usb - lsb <= 0))   /* fm1-radio: checked before they are kept */
     {
         return SBRDEC_ILLEGAL_SCFACTORS;   /* invalid bands */
     }
+
+    sbrDec->lowSubband  = lsb;
+    sbrDec->highSubband = usb;
+    sbrDec->noSubbands  = usb - lsb;
 
     /* Calculate number of noise bands */
     if (headerData->noise_bands == 0)

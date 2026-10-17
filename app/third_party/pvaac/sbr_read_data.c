@@ -282,6 +282,10 @@ SBR_ERROR sbr_read_data(SBRDECODER_DATA * self,
 
                         SbrChannel[lr].syncState = SBR_ACTIVE;
                     }
+                    if (sbr_err != SBRDEC_OK)   /* fm1-radio: out of the switch too (sbr_get_cpe hid the error) */
+                    {
+                        break;
+                    }
                 }
 
                 if (SbrChannel[0].syncState == SBR_ACTIVE)

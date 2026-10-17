@@ -845,6 +845,11 @@ OSCL_EXPORT_REF Int PVMP4AudioDecodeFrame(
      */
     frameLength = pVars->frameLength;
 
+    if (pMC_Info->nch < 1 || pMC_Info->nch > 2)   /* fm1-radio: one or two (pChVars[]) */
+    {
+        status = MP4AUDEC_INVALID_FRAME;
+    }
+
     if (status == SUCCESS)
     {
         /*

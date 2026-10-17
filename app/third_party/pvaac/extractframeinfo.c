@@ -206,6 +206,10 @@ SBR_ERROR extractFrameInfo(BIT_BUFFER     * hBitBuf,
             temp = buf_getbits(hBitBuf, SBR_ENV_BITS);   /* 2 bits */
 
             bs_num_env = 1 << temp;
+            if (bs_num_env > 4)                 /* fm1-radio: at most 4 (f[], tE[]: a damaged frame wrote past them) */
+            {
+                return SBRDEC_TOO_MANY_SBR_ENVELOPES;
+            }
 
 
             f[0] = buf_getbits(hBitBuf, SBR_RES_BITS);   /* 1 bit */
@@ -277,6 +281,10 @@ SBR_ERROR extractFrameInfo(BIT_BUFFER     * hBitBuf,
             bs_num_rel_1  = buf_getbits(hBitBuf, SBR_NUM_BITS);
 
             bs_num_env = bs_num_rel_0 + bs_num_rel_1 + 1;
+            if (bs_num_env > MAX_ENVELOPES)     /* fm1-radio: at most 5 (f[], tE[]: a damaged frame wrote past them) */
+            {
+                return SBRDEC_TOO_MANY_SBR_ENVELOPES;
+            }
 
             for (k = 0; k < bs_num_rel_0; k++)
             {                                                 /* 2 bits */
@@ -404,6 +412,11 @@ SBR_ERROR extractFrameInfo(BIT_BUFFER     * hBitBuf,
     };
 
 
+    if (middleBorder < 0 || middleBorder > bs_num_env)   /* fm1-radio: a damaged bs_pointer */
+    {
+        return SBRDEC_INVALID_BITSTREAM;
+    }
+
     tQ[0] = tE[0];
     if (bs_num_env > 1)
     {
@@ -457,6 +470,11 @@ SBR_ERROR extractFrameInfo(BIT_BUFFER     * hBitBuf,
             };
             break;
     };
+
+    if (lA < -1 || lA > bs_num_env)     /* fm1-radio: a damaged bs_pointer */
+    {
+        return SBRDEC_INVALID_BITSTREAM;
+    }
 
     /*
      * Build the frameInfo vector...

@@ -183,7 +183,7 @@ SBR_ERROR  sbr_applied(SBRDECODER_DATA * self,
              * This error condition disables any further SBR processing
              */
             self->SbrChannel[LEFT].syncState = UPSAMPLING;
-            if (eleChannels == 2)
+            if (stream->sbrElement[LEFT].ElementID == SBR_ID_CPE)   /* fm1-radio: eleChannels is not set yet here */
             {
                 self->SbrChannel[RIGHT].syncState = UPSAMPLING;
             }
