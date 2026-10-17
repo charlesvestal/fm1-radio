@@ -22,3 +22,7 @@ writing outside its memory. On a good stream the output is the same as before, s
   sbr_applied.c                both channels to upsampling after a read error (eleChannels was not set yet)
   sbr_dec.c                    SBR only on band tables that agree with each other (upsampling otherwise)
   sbr_generate_high_freq.c     at most MAX_NUM_PATCHES patches, and the patch loop ends (it could go round forever)
+
+And one change for the FM-1's CPU: the 64-bit multiply helpers (fxp_mul32_c_equivalent.h, FXP64) are not inlined,
+one copy each in fm1_fxp.c. Inlined among 16-bit loads, a multiply now and then left a register a bit off, and the
+decoder crashed every few minutes (notes/aac-crash); out of line it runs clean, about 50% slower.

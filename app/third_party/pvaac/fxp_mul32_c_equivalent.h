@@ -42,6 +42,13 @@ extern "C"
 
 #include "pv_audio_type_defs.h"
 
+/* fm1-radio: the 64-bit multiplies out of line, one copy each in fm1_fxp.c. Inlined, the compiler fills a
+ * multiply's latency with loads, and on the FM-1 a 16-bit load beside an inlined multiply came back wrong (the
+ * decoder crashed every few minutes); in a function of its own the multiply completes before the next load */
+#ifndef FXP64
+#define FXP64 __inline __attribute__((noinline))
+#endif
+
 
 #if defined(C_EQUIVALENT)
 
@@ -147,7 +154,7 @@ extern "C"
 
 
 
-    __inline  Int32 cmplx_mul32_by_16(Int32 x, const Int32 y, Int32 exp_jw)
+    FXP64  Int32 cmplx_mul32_by_16(Int32 x, const Int32 y, Int32 exp_jw)
     {
         Int32  rTmp0 = (Int16)(exp_jw >> 16);
         Int32  iTmp0 = exp_jw;
@@ -160,7 +167,7 @@ extern "C"
     }
 
 
-    __inline  Int32 fxp_mul32_by_16(Int32 L_var1, const Int32 L_var2)
+    FXP64  Int32 fxp_mul32_by_16(Int32 L_var1, const Int32 L_var2)
     {
         Int32  z;
 
@@ -172,7 +179,7 @@ extern "C"
 #define fxp_mul32_by_16b( a, b)   fxp_mul32_by_16( a, b)
 
 
-    __inline  Int32 fxp_mul32_by_16t(Int32 L_var1, const Int32 L_var2)
+    FXP64  Int32 fxp_mul32_by_16t(Int32 L_var1, const Int32 L_var2)
     {
         Int32  rTmp0 = (Int16)(L_var2 >> 16);
         Int32  z;
@@ -183,7 +190,7 @@ extern "C"
     }
 
 
-    __inline  Int32 fxp_mac32_by_16(const Int32 L_var1, const Int32 L_var2, Int32 L_add)
+    FXP64  Int32 fxp_mac32_by_16(const Int32 L_var1, const Int32 L_var2, Int32 L_add)
     {
         Int32  rTmp0 = L_var2 << 16;
 
@@ -192,81 +199,81 @@ extern "C"
         return(L_add);
     }
 
-    __inline  int64_t fxp_mac64_Q31(int64_t sum, const Int32 L_var1, const Int32 L_var2)
+    FXP64  int64_t fxp_mac64_Q31(int64_t sum, const Int32 L_var1, const Int32 L_var2)
     {
         sum += (int64_t)L_var1 * L_var2;
         return (sum);
     }
 
-    __inline Int32 fxp_mul32_Q31(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q31(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 32);
     }
 
-    __inline Int32 fxp_mac32_Q31(Int32 L_add, const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mac32_Q31(Int32 L_add, const Int32 a, const Int32 b)
     {
         return (L_add + (Int32)(((int64_t)(a) * b) >> 32));
     }
 
-    __inline Int32 fxp_msu32_Q31(Int32 L_sub, const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_msu32_Q31(Int32 L_sub, const Int32 a, const Int32 b)
     {
         return (L_sub - (Int32)(((int64_t)(a) * b) >> 32));
     }
 
 
-    __inline Int32 fxp_mul32_Q30(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q30(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 30);
     }
 
-    __inline Int32 fxp_mac32_Q30(const Int32 a, const Int32 b, Int32 L_add)
+    FXP64 Int32 fxp_mac32_Q30(const Int32 a, const Int32 b, Int32 L_add)
     {
         return (L_add + (Int32)(((int64_t)(a) * b) >> 30));
     }
 
 
-    __inline Int32 fxp_mul32_Q29(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q29(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 29);
     }
 
-    __inline Int32 fxp_mac32_Q29(const Int32 a, const Int32 b, Int32 L_add)
+    FXP64 Int32 fxp_mac32_Q29(const Int32 a, const Int32 b, Int32 L_add)
     {
         return (L_add + (Int32)(((int64_t)(a) * b) >> 29));
     }
 
-    __inline Int32 fxp_msu32_Q29(const Int32 a, const Int32 b, Int32 L_sub)
+    FXP64 Int32 fxp_msu32_Q29(const Int32 a, const Int32 b, Int32 L_sub)
     {
         return (L_sub - (Int32)(((int64_t)(a) * b) >> 29));
     }
 
 
-    __inline Int32 fxp_mul32_Q28(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q28(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 28);
     }
 
-    __inline Int32 fxp_mul32_Q27(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q27(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 27);
     }
 
-    __inline Int32 fxp_mul32_Q26(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q26(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 26);
     }
 
-    __inline Int32 fxp_mul32_Q20(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q20(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 20);
     }
 
-    __inline Int32 fxp_mul32_Q15(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q15(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 15);
     }
 
-    __inline Int32 fxp_mul32_Q14(const Int32 a, const Int32 b)
+    FXP64 Int32 fxp_mul32_Q14(const Int32 a, const Int32 b)
     {
         return (Int32)(((int64_t)(a) * b) >> 14);
     }
