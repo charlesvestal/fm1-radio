@@ -1,0 +1,21 @@
+diff --git a/chip/fm1_irq.h b/chip/fm1_irq.h
+index 46083c5..4b16587 100644
+--- a/chip/fm1_irq.h
++++ b/chip/fm1_irq.h
+@@ -50,6 +50,7 @@ typedef struct {
+  * file-local object would let the compiler assume its zero initial value and
+  * fold the magic check away. */
+ fm1_crash_t fm1_crash __attribute__((section(".noinit")));
++uint32_t fm1_crash_regs[20] __attribute__((section(".noinit")));   /* TEST: r0..r15, sp, psr, rets, reti */
+ 
+ extern const char fm1_fatal_stubs[];
+ static void fm1_fault(const fm1_crash_t *c);   /* application: report, then reset */
+@@ -110,6 +111,8 @@ void fm1_fault_c(uint32_t *f)
+     fm1_crash.emu = FM1_EMU_MSG;
+     fm1_crash.dbg = FM1_DBG_MSG;
+     fm1_crash.sp = f[24];
++    for (i = 0; i < 16u; i++) fm1_crash_regs[i] = f[i];   /* TEST */
++    fm1_crash_regs[16] = f[22]; fm1_crash_regs[17] = ((volatile uint32_t *)f[22])[5]; fm1_crash_regs[18] = ((volatile uint32_t *)f[22])[7]; fm1_crash_regs[19] = f[16];   /* usp, [usp+20], [usp+28], pc */
+     fm1_crash.psr = f[20];
+     fm1_crash.icfg = f[21];
+     fm1_crash.uptime_ms = *(volatile uint32_t *)0x10804u / 24000u;   /* TIMER4 since boot */

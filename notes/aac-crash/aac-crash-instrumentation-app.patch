@@ -1,0 +1,87 @@
+diff --git a/app/app.c b/app/app.c
+index 95826ea..daa4ebe 100644
+--- a/app/app.c
++++ b/app/app.c
+@@ -445,7 +445,7 @@ static void wire_dump(void)
+ #ifndef PLAT_HOST
+     {
+         extern void shim_os_dump(void);
+-        shim_os_dump();                           /* each task, what it waits for, its deepest stack: into the log */
++        (void)shim_os_dump;                        /* TEST: off (the log keeps the notes) */
+     }
+     {
+         extern uint32_t shim_heap_used, shim_heap_peak;
+diff --git a/app/radio.c b/app/radio.c
+index b34a50a..8faac96 100644
+--- a/app/radio.c
++++ b/app/radio.c
+@@ -122,9 +122,44 @@ static int aac_reset(void)
+     memset(aac_ext, 0, sizeof *aac_ext);
+     aac_ext->outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
+     aac_ext->desiredChannels = 2;
+-    aac_ext->aacPlusEnabled = 1;                  /* HE-AAC's SBR (built without PS: an HE-AAC v2 stream plays mono) */
++    aac_ext->aacPlusEnabled = 0;   /* TEST: SBR off */ /* HE-AAC's SBR (built without PS: an HE-AAC v2 stream plays mono) */
+     return PVMP4AudioDecoderInitLibrary(aac_ext, aac_mem) ? -1 : 0;
+ }
++/* TEST: the decoder's blocks as allocated (their heap headers, 8 bytes after its memory) */
++static uint32_t tg_hdr[3], tg_n, tg_noted;
++static void tg_set(void)
++{
++    tg_hdr[0] = ((uint32_t *)aac_ext)[-1];
++    tg_hdr[1] = ((uint32_t *)aac_mem)[-1];
++    tg_hdr[2] = ((uint32_t *)aac_out)[-1];
++    tg_n = PVMP4AudioDecoderGetMemRequirements();
++    memset((uint8_t *)aac_mem + tg_n, 0xA5, 8);
++}
++static void tg_check(const char *where)
++{
++    extern void shim_log(const char *);
++    extern int shim_heap_check(void);
++    int bad = 0, k;
++    if (dec_kind == 2) {
++        if (((uint32_t *)aac_ext)[-1] != tg_hdr[0]) bad |= 1;
++        if (((uint32_t *)aac_mem)[-1] != tg_hdr[1]) bad |= 2;
++        if (((uint32_t *)aac_out)[-1] != tg_hdr[2]) bad |= 4;
++        for (k = 0; k < 8; k++)
++            if (((uint8_t *)aac_mem)[tg_n + k] != 0xA5) bad |= 8;
++    }
++    if (bad && tg_noted < 4) {
++        char t[32];
++        tg_noted++;
++        w_cpy(t, "guard x ", sizeof t);
++        t[6] = (char)('0' + bad);
++        w_cpy(t + 8, where, 20);
++        shim_log(t);
++        if (dec_kind == 2)
++            tg_set();
++    }
++    if (shim_heap_check() && tg_noted < 8)
++        tg_noted++;
++}
+ static int dec_use(uint8_t kind)                  /* 0 = ready */
+ {
+     if (kind == dec_kind)
+@@ -151,6 +186,7 @@ static int dec_use(uint8_t kind)                  /* 0 = ready */
+             dec_drop();
+             return -1;
+         }
++        tg_set();
+         radio_aac_errs = 0;
+     }
+     dec_kind = kind;
+@@ -337,7 +373,9 @@ static void radio_poll(void)
+             aac_ext->pOutputBuffer = aac_out;
+             aac_ext->pOutputBuffer_plus = &aac_out[2048];   /* (SBR's second half, after the first) */
+             aac_ext->repositionFlag = 0;
++            tg_check("before");
+             err = PVMP4AudioDecodeFrame(aac_ext, aac_mem);
++            tg_check("after");
+             dec_timed(t0);
+             if (err == MP4AUDEC_INCOMPLETE_FRAME) {
+                 if (n >= LIN_MAX)
+diff --git a/base b/base
+--- a/base
++++ b/base
+@@ -1 +1 @@
+-Subproject commit 67275048dd4d8f6c65f95d37af0be662e6f0c3a0
++Subproject commit 67275048dd4d8f6c65f95d37af0be662e6f0c3a0-dirty

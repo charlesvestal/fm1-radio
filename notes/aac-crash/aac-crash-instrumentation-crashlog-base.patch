@@ -1,0 +1,25 @@
+diff --git a/device/main_fm1.c b/device/main_fm1.c
+index 5e66264..7bc8299 100644
+--- a/device/main_fm1.c
++++ b/device/main_fm1.c
+@@ -230,6 +230,20 @@ static int log_frame(const uint8_t *p, uint32_t n)
+         }
+         *q = 0;
+         log_line_send(b);
++        {   /* TEST: the registers */
++            extern uint32_t fm1_crash_regs[4][21];
++            for (uint32_t c = 0; c < 4u; c++) {
++                uint32_t *g = fm1_crash_regs[(fm1_crash.count + 1u + c) & 3u];   /* the oldest first */
++                for (i = 0; i < 20u; i += 4u) {
++                    q = b;
++                    *q++ = "0123456789ABCDEF"[g[20] >> 4 & 15u]; *q++ = "0123456789ABCDEF"[g[20] & 15u]; *q++ = ' ';
++                    *q++ = 'r'; *q++ = (char)('0' + i / 10u); *q++ = (char)('0' + i % 10u); *q++ = ' ';
++                    for (uint32_t j = 0; j < 4u; j++) { hexs(q, g[i + j]); q += 8; *q++ = ' '; }
++                    *q = 0;
++                    log_line_send(b);
++                }
++            }
++        }
+     } else {
+         log_line_send("no crash recorded");
+     }

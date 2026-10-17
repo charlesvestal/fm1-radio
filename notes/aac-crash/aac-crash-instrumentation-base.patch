@@ -1,0 +1,135 @@
+diff --git a/ble/shim/misc.c b/ble/shim/misc.c
+index 5aebf7c..0ab0552 100644
+--- a/ble/shim/misc.c
++++ b/ble/shim/misc.c
+@@ -130,6 +130,20 @@ void *malloc(size_t n)
+             if (shim_heap_used > shim_heap_peak)
+                 shim_heap_peak = shim_heap_used;
+             shim_irq_restore(f);
++            if (n >= 2048u) {                     /* TEST: big allocations, by whom */
++                extern void shim_log(const char *);
++                static const char hx[] = "0123456789ABCDEF";
++                char t[28]; uint32_t v = (uint32_t)(uintptr_t)__builtin_return_address(0), k, m = (uint32_t)n;
++                t[0] = 'm'; t[1] = ' ';
++                for (k = 0; k < 5; k++) t[2 + k] = (char)('0' + (m / (k == 0 ? 10000u : k == 1 ? 1000u : k == 2 ? 100u : k == 3 ? 10u : 1u)) % 10u);
++                t[7] = ' ';
++                for (k = 0; k < 8; k++) t[8 + k] = hx[(v >> (28 - 4 * k)) & 15u];
++                t[16] = ' ';
++                v = (uint32_t)(uintptr_t)b + 4u;
++                for (k = 0; k < 8; k++) t[17 + k] = hx[(v >> (28 - 4 * k)) & 15u];
++                t[25] = 0;
++                shim_log(t);
++            }
+             return (uint8_t *)b + 4;
+         }
+     shim_irq_restore(f);
+@@ -137,6 +151,46 @@ void *malloc(size_t n)
+     return 0;
+ }
+ 
++static int in_heap(const void *p, uint32_t n)       /* [p, p + n) inside one part of the heap */
++{
++    const uint8_t *a = p;
++    if (a >= (const uint8_t *)heap && a + n <= (const uint8_t *)heap + HEAP_BYTES)
++        return 1;
++#if SHIM_WIFI
++    if (a >= (const uint8_t *)heap2 && a + n <= (const uint8_t *)heap2 + HEAP2_BYTES)
++        return 1;
++#endif
++    return 0;
++}
++static void heap_note(const char *what, uint32_t v)
++{
++    static const char hx[] = "0123456789ABCDEF";
++    char t[40];
++    uint32_t k = 0, j;
++    while (*what && k < 28u)
++        t[k++] = *what++;
++    t[k++] = ' ';
++    for (j = 0; j < 8u; j++)
++        t[k++] = hx[(v >> (28 - 4 * j)) & 15u];
++    t[k] = 0;
++    shim_log(t);
++}
++/* the free list in order: each block inside the heap, 8-aligned, apart from the next (0 = whole) */
++int shim_heap_check(void)
++{
++    uint32_t f = shim_irq_save();
++    const blk_t *b;
++    int bad = 0;
++    for (b = free_list; b && !bad; b = b->next)
++        if (((uintptr_t)b & 7u) || b->size < 8u || (b->size & 7u) || !in_heap(b, b->size) ||
++            (b->next && (const uint8_t *)b + b->size >= (const uint8_t *)b->next))
++            bad = 1;
++    shim_irq_restore(f);
++    if (bad)
++        heap_note("heap: free list broken at", (uint32_t)(uintptr_t)b);
++    return bad;
++}
++
+ void free(void *p)
+ {
+     uint32_t f;
+@@ -145,9 +199,21 @@ void free(void *p)
+         return;
+     f = shim_irq_save();
+     b = (blk_t *)((uint8_t *)p - 4);
+-    shim_heap_used -= b->size;
++    if (((uintptr_t)b & 7u) || b->size < 8u || (b->size & 7u) || !in_heap(b, b->size)) {
++        shim_irq_restore(f);                      /* not a block of this heap: left alone */
++        heap_note("free: not ours, from", (uint32_t)(uintptr_t)__builtin_return_address(0));
++        return;
++    }
+     for (pp = &free_list; *pp && *pp < b; pp = &(*pp)->next)    /* address order: merge neighbours */
+         ;
++    if ((*pp && (uint8_t *)b + b->size > (uint8_t *)*pp) ||
++        (pp != &free_list && (uint8_t *)pp - offsetof(blk_t, next) +
++                                 ((blk_t *)((uint8_t *)pp - offsetof(blk_t, next)))->size > (uint8_t *)b)) {
++        shim_irq_restore(f);                      /* overlaps a free block: freed twice */
++        heap_note("free: twice, from", (uint32_t)(uintptr_t)__builtin_return_address(0));
++        return;
++    }
++    shim_heap_used -= b->size;
+     b->next = *pp;
+     *pp = b;
+     if (b->next && (uint8_t *)b + b->size == (uint8_t *)b->next) {
+diff --git a/bsp b/bsp
+--- a/bsp
++++ b/bsp
+@@ -1 +1 @@
+-Subproject commit e95a5da55f95fddaf78c6a1d07b38af3f59acce8
++Subproject commit e95a5da55f95fddaf78c6a1d07b38af3f59acce8-dirty
+diff --git a/device/main_fm1.c b/device/main_fm1.c
+index 5e66264..f08b908 100644
+--- a/device/main_fm1.c
++++ b/device/main_fm1.c
+@@ -230,6 +230,16 @@ static int log_frame(const uint8_t *p, uint32_t n)
+         }
+         *q = 0;
+         log_line_send(b);
++        {   /* TEST: the registers */
++            extern uint32_t fm1_crash_regs[20];
++            for (i = 0; i < 20u; i += 4u) {
++                q = b;
++                *q++ = 'r'; *q++ = (char)('0' + i / 10u); *q++ = (char)('0' + i % 10u); *q++ = ' ';
++                for (uint32_t j = 0; j < 4u; j++) { hexs(q, fm1_crash_regs[i + j]); q += 8; *q++ = ' '; }
++                *q = 0;
++                log_line_send(b);
++            }
++        }
+     } else {
+         log_line_send("no crash recorded");
+     }
+diff --git a/device/radio.c b/device/radio.c
+index 358c922..d0e1146 100644
+--- a/device/radio.c
++++ b/device/radio.c
+@@ -119,7 +119,7 @@ void shim_request_irq(int index, int prio, void (*handler)(void))
+     }
+     f = irq_save();
+     fm1_guard_unlock_top();
+-    fm1_irq_attach((uint32_t)index, handler, (uint32_t)(prio + 5 > 7 ? 7 : prio + 5));
++    fm1_irq_attach((uint32_t)index, handler, 2u);   /* TEST: below the audio (3) and the timer (4) */
+     fm1_guard_lock_top();
+     irq_restore(f);
+ }
