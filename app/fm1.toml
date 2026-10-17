@@ -22,3 +22,8 @@ net_include = ["third_party/bearssl/inc", "third_party/bearssl/src"]
 net_cflags = ["-DBR_USE_UNIX_TIME=0", "-DBR_USE_WIN32_TIME=0", "-DBR_USE_URANDOM=0", "-DBR_USE_GETENTROPY=0",
               "-DBR_USE_WIN32_RAND=0", "-DBR_RDRAND=0", "-DBR_AES_X86NI=0", "-DBR_SSE2=0", "-DBR_POWER8=0",
               "-DBR_64=0", "-DBR_INT128=0", "-DBR_UMUL128=0", "-DBR_LE_UNALIGNED=0", "-DBR_BE_UNALIGNED=0"]
+# the site (fm1-base tools/make_site.py, tools/publish_site.sh)
+tagline = "an internet radio for the FM-1"
+repo = "https://github.com/charlesvestal/fm1-radio"
+licence = "MPL-2.0"
+credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the stations are Radio Garden's."

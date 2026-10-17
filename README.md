@@ -6,13 +6,13 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
-- **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-radio/releases), then install it
-  over USB: `python3 base/tools/fm1_install.py radio-X.Y.fwsc` (from a checkout of this repository, with
-  `pip3 install mido python-rtmidi`).
+- **Install it** (Chrome or Edge, with the FM-1 plugged in): <https://charlesvestal.github.io/fm1-radio/install/>
+- **Try it in your browser** (no FM-1 needed; the interface only, as the browser has no network for the streams):
+  <https://charlesvestal.github.io/fm1-radio/emu/>
+- **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-radio/releases)
 
-Installing it is at your own risk, though it's hard to get stuck: the web installer on
-[FoMni's site](https://charlesvestal.github.io/fm1-fomni/install/) can put M-VAVE's own firmware back, and an FM-1
-that fails to start twice comes up in a safe mode it can reach.
+Installing it is at your own risk, though it's hard to get stuck: the web installer can put M-VAVE's own firmware
+back, and an FM-1 that fails to start twice comes up in a safe mode the installer can reach.
 
 ![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
 
@@ -185,14 +185,14 @@ quarter second, so below about 108 BPM the 1/8 stutter plays a 1/16 instead.
 | `fx N` | As holding white key N (1 to 16); `fx 0` lets go. |
 | `bpm N` | Set the tap tempo (41 to 167). |
 | `url URL` | Play the stream at URL, `http://` or `https://`, until the next tune. |
-| `rginfo` | The places built into the firmware. |
+| `rginfo` | The places table the FM-1 fetched. |
 
 fm1-base's `base/tools/fm1_remote.py` does the rest: WiFi (`wifi status`, `wifi join`, `wifi saved`...), the last
 crash and the radio's log (`log`), and the buttons, keys and knobs as a player would press and turn them.
 
 ## HTTPS and certificates
 
-The FM-1 plays `https://` MP3 streams as well as plain `http://` ones, and asks Radio Garden (HTTPS
+The FM-1 plays `https://` streams as well as plain `http://` ones, and asks Radio Garden (HTTPS
 only) for each place's stations, with
 [BearSSL](https://www.bearssl.org)'s TLS client:
 
@@ -207,7 +207,7 @@ That covers what streaming servers offer.
 server's key as sent and doesn't verify who signed it. The connection is encrypted, but someone on
 your network who wanted to could pose as the station or as Radio Garden, and send you other audio or
 another list. For a radio this is a small risk. Checking certificates would take BearSSL's checker, a
-set of root certificates and the date from network time, about 35–45 KB of flash, more than the 22 KB
+set of root certificates and the date from network time, about 35–45 KB of flash, more than the 6 KB
 now free.
 
 ## Known limits
