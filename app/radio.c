@@ -23,7 +23,8 @@ static const char *radio_url = RADIO_URL;
 #define NET_RING (20u * 1024u)                    /* ~1.25 s of 128 kbit/s (36 KB stalled as often: a weak link's gaps
                                                    * last seconds); the WiFi driver needs ~20 KiB of the heap left
                                                    * over, or its sends fail (connect: 113) */
-#define PCM_FRAMES (3u * 1152u)                  /* ~78 ms */
+#define PCM_FRAMES (4608u)                        /* ~104 ms: an HE-AAC frame adds 2048 at once, and at least
+                                                   * ~58 ms stays queued for the main loop's pauses (3456 left 32) */
 #define LIN_MAX (6u * 1024u)                      /* the decoder's window when the ring wraps */
 
 static volatile uint32_t pcm_r, pcm_w;            /* frames: the ISR reads, the main loop writes */
@@ -121,7 +122,7 @@ static int aac_reset(void)
     memset(aac_ext, 0, sizeof *aac_ext);
     aac_ext->outputFormat = OUTPUTFORMAT_16PCM_INTERLEAVED;
     aac_ext->desiredChannels = 2;
-    aac_ext->aacPlusEnabled = 0;              /* (built without SBR: an HE-AAC stream plays its AAC core) */
+    aac_ext->aacPlusEnabled = 1;                  /* HE-AAC's SBR (built without PS: an HE-AAC v2 stream plays mono) */
     return PVMP4AudioDecoderInitLibrary(aac_ext, aac_mem) ? -1 : 0;
 }
 static int dec_use(uint8_t kind)                  /* 0 = ready */
@@ -141,7 +142,7 @@ static int dec_use(uint8_t kind)                  /* 0 = ready */
         aac_ext = malloc(sizeof *aac_ext);
         aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements() + 8u);   /* (SBR's bit reader reads ahead 3 bytes past
                                                                            * its data, at the end of this) */
-        aac_out = malloc(2048u * sizeof *aac_out);
+        aac_out = malloc(4096u * sizeof *aac_out);   /* a frame: 1024 stereo, 2048 with SBR */
         if (!aac_ext || !aac_mem || !aac_out) {
             dec_drop();
             return -1;
@@ -292,7 +293,7 @@ static void radio_poll(void)
         mp3dec_frame_info_t info;
         int samples;
         const int16_t *src = pcm_tmp;
-        if (PCM_FRAMES - (pcm_w - pcm_r) < 1152u)
+        if (PCM_FRAMES - (pcm_w - pcm_r) < (dec_kind == 2 ? 2048u : 1152u))
             break;                                /* no room for a frame */
 #ifdef RADIO_LOCAL_TEST
         if (radio_mode == 2) {                    /* the built-in MP3, round and round */
@@ -334,7 +335,7 @@ static void radio_poll(void)
             aac_ext->inputBufferUsedLength = 0;
             aac_ext->remainderBits = 0;
             aac_ext->pOutputBuffer = aac_out;
-            aac_ext->pOutputBuffer_plus = aac_out;
+            aac_ext->pOutputBuffer_plus = &aac_out[2048];   /* (SBR's second half, after the first) */
             aac_ext->repositionFlag = 0;
             err = PVMP4AudioDecodeFrame(aac_ext, aac_mem);
             dec_timed(t0);
@@ -350,7 +351,7 @@ static void radio_poll(void)
                 continue;
             }
             radio_rd += (uint32_t)aac_ext->inputBufferUsedLength;
-            samples = aac_ext->frameLength;
+            samples = aac_ext->frameLength * (aac_ext->aacPlusUpsamplingFactor == 2 ? 2 : 1);
             info.hz = (int)aac_ext->samplingRate;
             info.channels = 2;                    /* (mono comes copied into both) */
             info.bitrate_kbps = (int)(aac_ext->bitRate / 1000);
@@ -395,7 +396,7 @@ static void radio_poll(void)
 #endif
     }
     /* play once half the stream buffer and the decoded audio are full; dry: pause and refill */
-    if (radio_st == RS_BUFFERING && pcm_w - pcm_r >= PCM_FRAMES - 1152u &&
+    if (radio_st == RS_BUFFERING && pcm_w - pcm_r >= PCM_FRAMES - (dec_kind == 2 ? 2048u : 1152u) &&
         (radio_mode == 2 || radio_wr - radio_rd >= NET_RING / 2u || radio_net_state != RN_STREAMING))
         radio_st = RS_PLAYING;
     else if (radio_mode != 2 && radio_st == RS_PLAYING && pcm_w == pcm_r && radio_wr - radio_rd < 2048u &&
