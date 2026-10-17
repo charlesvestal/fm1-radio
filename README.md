@@ -222,7 +222,7 @@ now free.
 - fm1-base raises the supplies to M-VAVE's own levels at start (VDC14 1.60 V, SYSVDD 1.38 V). At the boot
   loader's, flash reads failed under WiFi load and the FM-1 crashed.
 - The MP3 decoder has crashed twice, both times around a change of station, and the FM-1 restarted.
-  It hasn't happened on demand since; the crash record keeps the next one (see below).
+  It hasn't happened on demand since; the crash record keeps the next one (see above).
 - RAM is full (see below).
 
 ## Where the space goes
