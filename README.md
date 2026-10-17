@@ -6,13 +6,11 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
-- **Install it** (Chrome or Edge, with the FM-1 plugged in): <https://charlesvestal.github.io/fm1-radio/install/>
+Release 1.0 is withdrawn for now: on some FM-1s it crashes when WiFi starts or while it is loading the places.
+A new release follows once that is fixed. Until then, it can be built from source (below).
+
 - **Try it in your browser** (no FM-1 needed; the interface only, as the browser has no network for the streams):
   <https://charlesvestal.github.io/fm1-radio/emu/>
-- **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-radio/releases)
-
-Installing it is at your own risk, though it's hard to get stuck: the web installer can put M-VAVE's own firmware
-back, and an FM-1 that fails to start twice comes up in a safe mode the installer can reach.
 
 ![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
 
@@ -59,8 +57,8 @@ python3 base/tools/fm1_install.py app/build/radio.fwsc --yes      # the FM-1 plu
 The build makes `app/build/radio.fwsc` and checks the image and RAM sizes. `./build.sh --host` builds the
 host simulator instead (`app/build/host/radio_host`), with a stand-in network.
 
-To go back to M-VAVE's firmware, use the web installer on
-[FoMni's site](https://charlesvestal.github.io/fm1-fomni/install/). An FM-1 that fails to start twice
+To go back to M-VAVE's firmware, use the web installer's "Back to the stock firmware" on
+<https://charlesvestal.github.io/fm1-radio/install/>. An FM-1 that fails to start twice
 starts in a safe mode with USB on, and holding OCT− and OCT+ for 5 seconds starts update mode.
 
 ### The places
