@@ -4,6 +4,8 @@
 // quantum asks it for 128 frames, which runs the device's clock forward; between quanta the page's
 // input goes in and, about 30 times a second, the screen, the lights, any saved objects and what the
 // firmware said to a screen reader (fm1-reader's SysEx frames) go out.
+// An app can add its own part (APP_DIR/web/emu/app_worklet.js, loaded first): globalThis.fm1App with any of
+// load(fm1), message(fm1, m) for the page's { type: "app" } messages, and process(fm1) before each quantum.
 
 const clock = globalThis.performance ? () => globalThis.performance.now() : () => Date.now();
 
@@ -37,6 +39,8 @@ class Fm1 extends AudioWorkletProcessor {
       this.ex = instance.exports;
       this.mem = this.ex.memory;
       if (this.ex._initialize) this.ex._initialize();
+      this.app = globalThis.fm1App || {};
+      if (this.app.load) this.app.load(this);
       const max = this.ex.web_store_max();
       for (const [obj, bytes] of Object.entries(m.store || {})) {
         const b = new Uint8Array(bytes).subarray(0, max);
@@ -61,6 +65,8 @@ class Fm1 extends AudioWorkletProcessor {
       const b = Uint8Array.from(m.bytes).subarray(0, 64);
       new Uint8Array(this.mem.buffer, this.ex.web_sysex_buf(), b.length).set(b);
       this.ex.web_sysex(b.length);
+    } else if (m.type === "app" && this.app.message) {
+      this.app.message(this, m);
     }
   }
 
@@ -101,6 +107,7 @@ class Fm1 extends AudioWorkletProcessor {
     const out = outputs[0];
     const n = out[0].length;
     const t0 = clock();
+    if (this.app.process) this.app.process(this);
     this.ex.web_render(n);
     this.busy += clock() - t0;
     this.frames += n;

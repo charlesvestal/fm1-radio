@@ -629,6 +629,7 @@ function saveStore(store) {
 
 // ---------------------------------------------------------------- switching on
 const status = $("status"), cpu = $("cpu");
+let appPart = null;
 function showAlert(t) { $("alert").textContent = t; }
 async function switchOn() {
   const go = $("go");
@@ -639,7 +640,8 @@ async function switchOn() {
     const ac = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" });
     if (speakMode() === "voice") voiceOn();
     const [wasm] = await Promise.all([fetch("app.wasm").then((r) => { if (!r.ok) throw new Error(`app.wasm: ${r.status}`); return r.arrayBuffer(); }),
-                                      ac.audioWorklet.addModule("worklet.js")]);
+                                      ac.audioWorklet.addModule("app_worklet.js").catch(() => {})
+                                        .then(() => ac.audioWorklet.addModule("worklet.js"))]);
     node = new AudioWorkletNode(ac, "fm1", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
     gain = ac.createGain();
     gain.gain.value = $("mute").getAttribute("aria-pressed") === "true" ? 0 : 1;
@@ -655,9 +657,13 @@ async function switchOn() {
           window.emuLast = m;
           if (m.load !== undefined) cpu.textContent = `RADIO uses ${m.load}% of this computer's time`;
           if (m.store) saveStore(m.store);
-        }
+        } else if (m.type === "app" && appPart && appPart.message) appPart.message(m);
       };
     });
+    // the app's own part of the page (APP_DIR/web/emu/app.js), if it has one: attach({ node, ac, status }), and
+    // message(m) for the worklet's { type: "app" } messages
+    appPart = await import("./app.js").catch(() => null);
+    if (appPart && appPart.attach) appPart.attach({ node, ac, status: (t) => showAlert(t) });
     node.port.postMessage({ type: "load", wasm, store: loadStore(), master }, [wasm]);
     await ready;
     await ac.resume();
