@@ -11,6 +11,7 @@ words = "words.tsv"
 o2 = ["third_party/pvaac/*.c"]
 o2_cflags = ["-DAAC_PLUS"]
 rom_check_skip = ["pv_log2"]           # its fixed-point constant 0xFFC9515E is a number, not a ROM address
+mul64_check_skip = ["mul_f256", "square_f256", "br_i31_montymul", "br_i31_from_monty", "br_i31_muladd_small"]   # BearSSL: TLS handshakes only, 32-bit loads
 o2_include = ["third_party/pvaac/pv_fm1.h"]
 vendored = ["third_party/"]           # BearSSL and minimp3: the register check skips them (x86 / POWER8 code off)
 device_include = ["third_party/compat"]   # minimp3's <string.h> / <stdlib.h>: the toolchain has no C library headers
