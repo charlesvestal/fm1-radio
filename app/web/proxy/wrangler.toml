@@ -1,0 +1,6 @@
+# Radio's emulator proxy (worker.js): wrangler deploy
+name = "fm1-radio-proxy"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+workers_dev = true

@@ -765,7 +765,170 @@ void app_loop(void)
     radio_poll();
 }
 
-#ifdef PLAT_HOST
+#ifdef PLAT_WEB
+/* the browser emulator: the page does the network (web/emu/app.js: fetch, through a proxy for Radio Garden, which
+ * answers no other site), the worklet hands its bytes over (web/emu/app_worklet.js), and the app plays them as on
+ * the FM-1: the same decoders, the same ring. A request is a generation number the worklet watches; what comes back
+ * for an older one is dropped. Strings travel through web_net_scratch, NUL-separated. */
+#pragma push_macro("__attribute__")              /* (plat_host.c defines it away) */
+#undef __attribute__
+#define WEB_EXPORT __attribute__((used, visibility("default")))
+volatile int radio_net_state, rgn_state, radio_net_aac;
+volatile uint32_t radio_rd, radio_wr, rgn_n;
+char radio_net_why[32], radio_net_name[48], rgn_why[32];
+static rgn_station_t web_st[RGN_MAX];
+rgn_station_t *rgn_list = web_st;
+static uint8_t web_scratch[32768];
+static char web_url[512], web_place[32], web_country[32];
+static uint8_t *web_ring;
+static uint32_t web_ring_size, web_net_g, web_rgn_g, web_rgp_g;
+static int web_running;
+WEB_EXPORT uint8_t *web_net_scratch(void) { return web_scratch; }
+WEB_EXPORT uint32_t web_scratch_size(void) { return sizeof web_scratch; }
+
+/* the stream: wanted while web_net_want(), from web_net_url() */
+int radio_net_start(const char *u, uint8_t *buf, uint32_t size)
+{
+    if (web_running)
+        return -1;
+    w_cpy(web_url, u, sizeof web_url);
+    web_ring = buf;
+    web_ring_size = size;
+    radio_rd = radio_wr = 0;
+    radio_net_why[0] = radio_net_name[0] = 0;
+    radio_net_aac = 0;
+    radio_net_state = RN_CONNECTING;
+    web_running = 1;
+    web_net_g++;
+    return 0;
+}
+void radio_net_stop(void)
+{
+    if (!web_running)
+        return;
+    web_running = 0;
+    radio_net_state = RN_IDLE;
+    web_net_g++;                                  /* the page lets go of the fetch */
+}
+int radio_net_running(void) { return web_running; }
+int radio_net_tls(void) { return 0; }
+WEB_EXPORT uint32_t web_net_gen(void) { return web_net_g; }
+WEB_EXPORT int web_net_want(void) { return web_running; }
+WEB_EXPORT char *web_net_url(void) { return web_url; }
+WEB_EXPORT uint32_t web_net_room(void) { return web_running ? web_ring_size - (radio_wr - radio_rd) : 0; }
+/* the stream's answer: playing, AAC or MP3, the station's name (scratch) if the page could read it */
+WEB_EXPORT void web_net_head(uint32_t g, int aac)
+{
+    if (g != web_net_g || !web_running)
+        return;
+    radio_net_aac = aac;
+    w_cpy(radio_net_name, (const char *)web_scratch, sizeof radio_net_name);
+    radio_net_state = RN_STREAMING;
+}
+/* n bytes of the stream from scratch into the ring, as many as fit; how many were taken (all, for an old one) */
+WEB_EXPORT uint32_t web_net_put(uint32_t g, uint32_t n)
+{
+    uint32_t room, k, at;
+    if (g != web_net_g || !web_running)
+        return n;
+    room = web_ring_size - (radio_wr - radio_rd);
+    if (n > room)
+        n = room;
+    for (k = 0; k < n; k++) {
+        at = (radio_wr + k) % web_ring_size;
+        web_ring[at] = web_scratch[k];
+    }
+    RING_PUBLISH();
+    radio_wr += n;
+    return n;
+}
+/* it ended: state RN_ERROR, RN_ENDED or RN_UNPLAYABLE, the reason in scratch */
+WEB_EXPORT void web_net_end(uint32_t g, int state)
+{
+    if (g != web_net_g || !web_running)
+        return;
+    w_cpy(radio_net_why, (const char *)web_scratch, sizeof radio_net_why);
+    radio_net_state = state;
+    web_running = 0;
+}
+
+/* Radio Garden: a place's stations */
+int rgn_start(const char *place, const char *country)
+{
+    if (rgn_state == RGN_BUSY)
+        return -1;
+    w_cpy(web_place, place, sizeof web_place);
+    w_cpy(web_country, country, sizeof web_country);
+    rgn_n = 0;
+    rgn_why[0] = 0;
+    rgn_state = RGN_BUSY;
+    web_rgn_g++;
+    return 0;
+}
+WEB_EXPORT uint32_t web_rgn_gen(void) { return web_rgn_g; }
+WEB_EXPORT int web_rgn_busy(void) { return rgn_state == RGN_BUSY; }
+WEB_EXPORT char *web_rgn_place(void) { return web_place; }
+WEB_EXPORT char *web_rgn_country(void) { return web_country; }
+/* a station: "id\0title\0" in scratch */
+WEB_EXPORT void web_rgn_add(uint32_t g)
+{
+    const char *id = (const char *)web_scratch;
+    if (g != web_rgn_g || rgn_state != RGN_BUSY || rgn_n >= RGN_MAX)
+        return;
+    w_cpy(web_st[rgn_n].id, id, sizeof web_st[rgn_n].id);
+    w_cpy(web_st[rgn_n].title, id + strlen(id) + 1u, sizeof web_st[rgn_n].title);
+    rgn_n++;
+}
+WEB_EXPORT void web_rgn_end(uint32_t g, int ok)
+{
+    if (g != web_rgn_g || rgn_state != RGN_BUSY)
+        return;
+    if (!ok)
+        w_cpy(rgn_why, (const char *)web_scratch, sizeof rgn_why);
+    rgn_state = ok || rgn_n ? RGN_DONE : RGN_ERROR;
+}
+
+/* Radio Garden: every place, for the table the app builds (places.c), handed over a batch at a time */
+volatile int rgp_state;
+volatile uint32_t rgp_bytes;
+char rgp_why[32];
+static void (*web_rgp_cb)(const char *title, const char *country);
+int rgp_start(void (*cb)(const char *title, const char *country))
+{
+    if (rgp_state == 1)                           /* RGP_BUSY */
+        return -1;
+    web_rgp_cb = cb;
+    rgp_bytes = 0;
+    rgp_why[0] = 0;
+    rgp_state = 1;
+    web_rgp_g++;
+    return 0;
+}
+WEB_EXPORT uint32_t web_rgp_gen(void) { return web_rgp_g; }
+WEB_EXPORT int web_rgp_busy(void) { return rgp_state == 1; }
+/* n bytes of "title\0country\0" pairs in scratch, as received from bytes more of the list */
+WEB_EXPORT void web_rgp_feed(uint32_t g, uint32_t n, uint32_t bytes)
+{
+    uint32_t i = 0;
+    if (g != web_rgp_g || rgp_state != 1)
+        return;
+    while (i < n) {
+        const char *t = (const char *)web_scratch + i, *c = t + strlen(t) + 1u;
+        web_rgp_cb(t, c);
+        i = (uint32_t)(c - (const char *)web_scratch) + (uint32_t)strlen(c) + 1u;
+    }
+    rgp_bytes += bytes;
+}
+WEB_EXPORT void web_rgp_end(uint32_t g, int ok)
+{
+    if (g != web_rgp_g || rgp_state != 1)
+        return;
+    if (!ok)
+        w_cpy(rgp_why, (const char *)web_scratch, sizeof rgp_why);
+    rgp_state = ok ? 2 : 3;                       /* RGP_DONE, RGP_ERROR */
+}
+#pragma pop_macro("__attribute__")
+#elif defined PLAT_HOST
 /* the host simulator has no lwIP (net/radio_net.c is the device's): Radio Garden answers with two stations, and a
  * stream cannot start */
 volatile int radio_net_state, rgn_state, radio_net_aac;

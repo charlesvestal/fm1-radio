@@ -9,7 +9,8 @@ It is a proof of concept: it works, and the rough edges are listed at the end.
 Release 1.0 is withdrawn for now: on some FM-1s it crashes when WiFi starts or while it is loading the places.
 A new release follows once that is fixed. Until then, it can be built from source (below).
 
-- **Try it in your browser** (no FM-1 needed; the interface only, as the browser has no network for the streams):
+- **Try it in your browser** (no FM-1 needed; it plays the stations, effects and all, through Radio's own decoders;
+  Radio Garden's lists come through a small proxy, `app/web/proxy/`, as its site answers no other):
   <https://charlesvestal.github.io/fm1-radio/emu/>
 
 ![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
