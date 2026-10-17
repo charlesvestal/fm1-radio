@@ -71,7 +71,20 @@ static volatile uint32_t radio_underruns;
 static uint32_t radio_frames, radio_hz, radio_kbps;
 static volatile uint32_t radio_step = 1u << 16;  /* stream frames per output frame, Q16 */
 static uint32_t radio_frac;                      /* the render's position between two frames, Q16 (its own) */
-static uint32_t radio_dec_us, radio_dec_n;        /* decode time, summed, and frames timed */
+static uint32_t radio_dec_us, radio_dec_n, radio_dec_max;   /* decode time, summed, frames timed, the longest */
+#ifdef PLAT_HOST
+static uint32_t dec_us_now(void) { return plat_ms() * 1000u; }
+#else
+static uint32_t dec_us_now(void) { return fm1_ticks() / FM1_TICKS_PER_US; }   /* (TIMER4: wraps every 179 s) */
+#endif
+static void dec_timed(uint32_t t0)                /* a frame decoded, from t0 */
+{
+    uint32_t d = dec_us_now() - t0;
+    radio_dec_us += d;
+    if (d > radio_dec_max)
+        radio_dec_max = d;
+    radio_dec_n++;
+}
 static uint32_t radio_rebuffers;
 static uint32_t radio_reconnects, radio_retry_at;  /* the stream dropped: when to fetch it again (ms) */
 static char radio_why[32];
@@ -282,10 +295,9 @@ static void radio_poll(void)
             n = sizeof test_mp3 - local_pos;
             if (n > LIN_MAX)
                 n = LIN_MAX;
-            t0 = plat_ms();
+            t0 = dec_us_now();
             samples = mp3dec_decode_frame(mp3, in, (int)n, pcm_tmp, &info);
-            radio_dec_us += (plat_ms() - t0) * 1000u;
-            radio_dec_n++;
+            dec_timed(t0);
             local_pos += info.frame_bytes ? (uint32_t)info.frame_bytes : n;
             goto decoded;
         }
@@ -306,7 +318,7 @@ static void radio_poll(void)
             radio_st = RS_ERROR;
             return;
         }
-        t0 = plat_ms();
+        t0 = dec_us_now();
         if (dec_kind == 2) {                      /* AAC: an ADTS frame (the decoder finds its header) */
             int err;
             aac_ext->pInputBuffer = (UChar *)in;
@@ -318,8 +330,7 @@ static void radio_poll(void)
             aac_ext->pOutputBuffer_plus = aac_out;
             aac_ext->repositionFlag = 0;
             err = PVMP4AudioDecodeFrame(aac_ext, aac_mem);
-            radio_dec_us += (plat_ms() - t0) * 1000u;
-            radio_dec_n++;
+            dec_timed(t0);
             if (err == MP4AUDEC_INCOMPLETE_FRAME) {
                 if (n >= LIN_MAX)
                     radio_rd += n / 2u;           /* no frame in a full window: skip garbage */
@@ -338,8 +349,7 @@ static void radio_poll(void)
             src = aac_out;
         } else {
         samples = mp3dec_decode_frame(mp3, in, (int)n, pcm_tmp, &info);
-        radio_dec_us += (plat_ms() - t0) * 1000u;
-        radio_dec_n++;
+        dec_timed(t0);
         if (!info.frame_bytes) {
             if (n >= LIN_MAX)
                 radio_rd += n / 2u;               /* no frame in a full window: skip garbage */

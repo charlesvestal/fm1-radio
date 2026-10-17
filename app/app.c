@@ -467,10 +467,15 @@ static void wire_dump(void)
     wire_line(b);
     {   /* rates since the last dump: what came in, what was decoded, how often the main loop went round */
         static uint32_t t_last, wr_last, fr_last, loops_last;
-        uint32_t dt = plat_ms() - t_last ? plat_ms() - t_last : 1u;
-        snprintf(b, sizeof b, "  mode %u  in %u kbit/s  decoded %u fr/s (need 38)  loop %u/s", radio_mode,
+        uint32_t dt = plat_ms() - t_last ? plat_ms() - t_last : 1u, spf;
+        snprintf(b, sizeof b, "  decode %u us a frame, %u at most", radio_dec_n ? (unsigned)(radio_dec_us / radio_dec_n) : 0u,
+                 (unsigned)radio_dec_max);
+        wire_line(b);
+        radio_dec_us = radio_dec_n = radio_dec_max = 0;
+        spf = dec_kind != 2 ? 1152u : aac_ext->aacPlusUpsamplingFactor == 2 ? 2048u : 1024u;   /* samples a frame */
+        snprintf(b, sizeof b, "  mode %u  in %u kbit/s  decoded %u fr/s (need %u)  loop %u/s", radio_mode,
                  (unsigned)((radio_wr - wr_last) * 8u / dt), (unsigned)((radio_frames - fr_last) * 1000u / dt),
-                 (unsigned)((main_loops - loops_last) * 1000u / dt));
+                 (unsigned)(radio_hz / spf), (unsigned)((main_loops - loops_last) * 1000u / dt));
         wire_line(b);
         t_last = plat_ms();
         wr_last = radio_wr;
