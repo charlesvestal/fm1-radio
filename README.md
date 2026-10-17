@@ -6,14 +6,22 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
+- **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-radio/releases), then install it
+  over USB: `python3 base/tools/fm1_install.py radio-X.Y.fwsc` (from a checkout of this repository, with
+  `pip3 install mido python-rtmidi`).
+
+Installing it is at your own risk, though it's hard to get stuck: the web installer on
+[FoMni's site](https://charlesvestal.github.io/fm1-fomni/install/) can put M-VAVE's own firmware back, and an FM-1
+that fails to start twice comes up in a safe mode it can reach.
+
 ![Home: a station in Amsterdam, with the four knobs](docs/img/home.png) ![The browser: the city's stations](docs/img/browse.png)
 
 ## Licensing
 
 The source is free software under MPL-2.0. Radio is built on [fm1-base](https://github.com/charlesvestal/fm1-base),
 the MPL platform for FM-1 firmware (from Felucca, with its author's permission), so the firmware may link JieLi's
-WiFi libraries, which are Apache-2.0. There are no releases yet. For where each part of the code comes from, see
-[`LICENSING.md`](LICENSING.md).
+WiFi libraries, which are Apache-2.0, and the firmware file may be shared. For where each part of the code comes
+from, see [`LICENSING.md`](LICENSING.md).
 
 ## Building
 
@@ -208,8 +216,8 @@ now free.
   30 KB more RAM than is left), and HLS, MP4 and Ogg streams don't play.
 - A place shows up to 100 stations.
 - Server certificates aren't checked (see above).
-- The core voltage is raised to 1.50 V at start (the SDK uses 1.45 V at this clock). At 1.40 V, flash
-  reads failed under WiFi load and the FM-1 crashed.
+- fm1-base raises the supplies to M-VAVE's own levels at start (VDC14 1.60 V, SYSVDD 1.38 V). At the boot
+  loader's, flash reads failed under WiFi load and the FM-1 crashed.
 - The MP3 decoder has crashed twice, both times around a change of station, and the FM-1 restarted.
   It hasn't happened on demand since; the crash record over USB (`dump`) keeps the next one.
 - RAM is full (see below).
@@ -219,18 +227,21 @@ now free.
 The FM-1 has no external RAM, so WiFi has to fit in the chip's own memory beside the radio. The figures are from
 the build of October 2026 on fm1-base, rounded.
 
-- **Flash:** the image is 492 KB of the 581 KB app slot, 90 KB free. WiFi is about 299 KB of it (JieLi's driver
-  146 KB, the WPA supplicant 77 KB, lwIP 51 KB, the RF layer, crypto, the shim and its glue 25 KB), HTTPS (BearSSL
-  and the TLS glue) 36 KB, and the radio, minimp3, the pages, the fonts and the platform the rest (the places are in the data flash, fetched
-  by the FM-1: about 125 KB). The large font fm1-base draws its splash with is left out (`APP_BIG_FONT FONT_M`: 20 KB).
-- **RAM:** `.data` and `.bss` use 129.6 KB of 131 KB (fm1-base's WiFi memory map: 128 KB of RAM). WiFi's driver,
+- **Flash:** the image is 576 KB of the 581 KB app slot, about 6 KB free. WiFi is about 299 KB of it (JieLi's
+  driver 146 KB, the WPA supplicant 77 KB, lwIP 51 KB, the RF layer, crypto, the shim and its glue 25 KB), HTTPS
+  (BearSSL and the TLS glue) 36 KB, the AAC decoder about 85 KB, and the radio, minimp3, the pages, the fonts and the
+  platform the rest (the places are in the data flash, fetched by the FM-1: about 125 KB). The large font fm1-base
+  draws its splash with is left out (`APP_BIG_FONT FONT_M`: 20 KB).
+- **RAM:** `.data` and `.bss` use 126.8 KB of 128 KB (fm1-base's WiFi memory map). WiFi's driver,
   RF layer, lwIP and the shim's 14-task table are about 100 KB of it.
-- **The pool:** 307 KB of 311 KB: 13 task stacks of 8 KB (104 KB), the heap (144 KB), lwIP's packet buffers
-  (28 KB), the screen's drawing buffer (240 × 48 pixels, 23 KB).
+- **The pool:** 307 KB of 311 KB: most of the heap (248 KB), lwIP's packet buffers (28 KB), the screen's drawing
+  buffer (240 × 48 pixels, 23 KB). The heap's other 24 KB is in RAM; its 272 KB also hold the WiFi tasks' stacks
+  (4 to 8 KB each, as each task starts).
 
-While a station plays, the radio takes about 57 KB of the heap: the stream buffer (20 KB), the decoded audio
-(14 KB), the effects' history (12 KB) and the decoder (11 KB). WiFi, WPA and lwIP take about 60 KB, and an HTTPS
-stream adds its 16.7 KB record buffer. The heap peaks at about 138 of 144 KB on HTTPS.
+While a station plays, the radio takes the stream buffer (20 KB), the decoded audio (18 KB), the effects' history
+(12 KB) and the decoder: 11 KB for MP3, 89 KB for AAC with HE-AAC's SBR. With WiFi, WPA, lwIP and an HTTPS stream's
+16.7 KB record buffer, the heap holds about 177 KB on an MP3 station and 254 KB on an HE-AAC one, of 272 KB; a
+background scan of the WiFi library's (on a weak link) takes about 10 KB more, and keeps it.
 
 ## History
 

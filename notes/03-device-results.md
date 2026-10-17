@@ -32,4 +32,5 @@ and use no hardware loops (`rep`); only FoMni's render does. IRQ numbering match
   (their FreeRTOS port may wrap ISRs: nesting / `reti` handling we do not reproduce).
 - Run with only the BLE IRQs at JieLi's own priorities (no remap above the audio), audio off.
 - Compare the stock M-VAVE firmware's flash (its VM area) for the FM-1's real RF calibration.
-- Licensing is unchanged: shipping needs Hügelton's linking exception, or a user-side build.
+- Licensing is unchanged: shipping needs Hügelton's linking exception, or a user-side build. (Then, on Felucca's
+  GPL platform. Since Radio moved to fm1-base, MPL-2.0, the firmware may be shipped: see LICENSING.md.)
