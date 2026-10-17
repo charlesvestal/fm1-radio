@@ -190,6 +190,9 @@ quarter second, so below about 108 BPM the 1/8 stutter plays a 1/16 instead.
 fm1-base's `base/tools/fm1_remote.py` does the rest: WiFi (`wifi status`, `wifi join`, `wifi saved`...), the last
 crash and the radio's log (`log`), and the buttons, keys and knobs as a player would press and turn them.
 
+After a crash, the installer page's "Report a problem" reads the same crash record and log in Chrome or Edge, ready
+to copy. Don't switch the FM-1 off first: the record survives a restart, not switching off.
+
 ## HTTPS and certificates
 
 The FM-1 plays `https://` streams as well as plain `http://` ones, and asks Radio Garden (HTTPS
@@ -219,7 +222,7 @@ now free.
 - fm1-base raises the supplies to M-VAVE's own levels at start (VDC14 1.60 V, SYSVDD 1.38 V). At the boot
   loader's, flash reads failed under WiFi load and the FM-1 crashed.
 - The MP3 decoder has crashed twice, both times around a change of station, and the FM-1 restarted.
-  It hasn't happened on demand since; the crash record over USB (`dump`) keeps the next one.
+  It hasn't happened on demand since; the crash record keeps the next one (see below).
 - RAM is full (see below).
 
 ## Where the space goes
