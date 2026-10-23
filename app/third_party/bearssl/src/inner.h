@@ -948,7 +948,20 @@ MAX(uint32_t x, uint32_t y)
  * implementation assumes that the basic multiplication operator
  * yields constant-time code.
  */
-#define MUL(x, y)   ((uint64_t)(x) * (uint64_t)(y))
+/*
+ * fm1-radio: on the FM-1 (felucca-bsp docs/CPU.md) an inlined 32x32->64-bit
+ * multiply beside a load now and then leaves a register a bit off; so every
+ * 64-bit product is made in a function of its own, its arguments in
+ * registers and its product used at once. Still constant-time: the call
+ * does not depend on the values.
+ */
+static __attribute__((noinline, unused)) uint64_t
+br_fm1_mul64(uint32_t x, uint32_t y)
+{
+	return (uint64_t)x * (uint64_t)y;
+}
+
+#define MUL(x, y)   br_fm1_mul64((uint32_t)(x), (uint32_t)(y))
 
 #if BR_CT_MUL31
 
@@ -990,7 +1003,7 @@ MUL31_lo(uint32_t x, uint32_t y)
  * yields constant-time code.
  * The MUL31_lo() macro returns only the low 31 bits of the product.
  */
-#define MUL31(x, y)     ((uint64_t)(x) * (uint64_t)(y))
+#define MUL31(x, y)     br_fm1_mul64((uint32_t)(x), (uint32_t)(y))   /* (fm1-radio: MUL's) */
 #define MUL31_lo(x, y)  (((uint32_t)(x) * (uint32_t)(y)) & (uint32_t)0x7FFFFFFF)
 
 #endif
