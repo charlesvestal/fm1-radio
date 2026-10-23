@@ -366,6 +366,7 @@ static int pl_cmp(const char *a, const char *b)    /* rg_places.py's order: with
     return strcmp(a, b);
 }
 
+#define PL_NET_ROOM (16709u + 2048u + 1024u)     /* radio_net.c: a TLS record buffer, a js_t, and some over */
 static void pl_free(void)
 {
     free(pc);
@@ -443,8 +444,13 @@ static int pl_plan(void)
         if (pc[i].bytes + pc[i].n > biggest)
             biggest = pc[i].bytes + pc[i].n;
     }
-    for (bbuf_size = 72u * 1024u; bbuf_size >= biggest && !(bbuf = malloc(bbuf_size)); bbuf_size -= 4096u)
-        ;
+    {   /* the batches download again: leave room for that connection (its JSON reader, then its TLS record
+         * buffer, BR_SSL_BUFSIZE_MONO 16709 bytes), or the largest buffer takes it ("tls: no memory") */
+        void *room = malloc(PL_NET_ROOM);
+        for (bbuf_size = 72u * 1024u; bbuf_size >= biggest && !(bbuf = malloc(bbuf_size)); bbuf_size -= 4096u)
+            ;
+        free(room);
+    }
     if (!bbuf)
         return -2;
     pb.passes = 1;
