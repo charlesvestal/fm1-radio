@@ -376,6 +376,10 @@ static void pl_free(void)
     pc_order = 0;
     bbuf = 0;
 }
+/* a missing table comes first: a playing stream is stopped for the fetch (one TLS connection, and the RAM, at a time)
+ * and comes back after it (radio_ui_restore). Not after a failure: a fetch that keeps failing waits for the stream to
+ * end, or every retry would cut it off. A refresh asks again. */
+static uint8_t pl_first = 1;
 static void pl_fail(const char *why)
 {
     w_cpy(pb.why, why, sizeof pb.why);
@@ -383,6 +387,12 @@ static void pl_fail(const char *why)
     pl_free();
     pb.state = PB_FAILED;
     pb.retry_at = plat_ms() + 30000u;
+    pl_first = 0;
+}
+/* radio_ui's: no stream while the places are being fetched, or are about to be */
+static int places_busy(void)
+{
+    return (pb.state != PB_IDLE && pb.state != PB_FAILED) || (pb.state == PB_IDLE && !rg && pl_first);
 }
 
 /* the table's strings: the continents', then the countries' */
@@ -634,10 +644,18 @@ static void places_poll(void)
         pb.state = PB_IDLE;
         /* fall through */
     case PB_IDLE:
-        if (rg || wifi_st != WS_CONNECTED || radio_net_running())
+        if (rg || wifi_st != WS_CONNECTED)
             break;
+        if (radio_net_running()) {                 /* a stream: stopped first (pl_first), its connection let go */
+            if (pl_first && radio_st != RS_OFF)
+                radio_stop();
+            break;
+        }
         if (radio_st != RS_OFF)
             radio_stop();                          /* (one TLS connection at a time) */
+        dec_drop();                                /* and the decoder's RAM back (AAC's 53 KB, which a stop keeps): after
+                                                    * a stream the places' buffers did not fit ("places: no memory");
+                                                    * the next stream takes a decoder again */
         memset(&pb, 0, sizeof pb);
         if (!(pc = malloc(PC_MAX * sizeof *pc))) {
             pl_fail("places: no memory");
@@ -682,11 +700,14 @@ static void places_poll(void)
             pl_fail("places: the list changed");
             break;
         }
-        while (pb.cur < pb.n_pc && pc[pc_order[pb.cur]].batch == pb.pass)   /* the batch's countries */
-            if (pl_country(pc_order[pb.cur++])) {
+        if (pb.cur < pb.n_pc && pc[pc_order[pb.cur]].batch == pb.pass) {   /* the batch's countries: one a pass of
+                                                   * the main loop. A whole batch at once (each country a scan of the
+                                                   * batch, a sort and its flash writes) held WiFi's tasks off for
+                                                   * seconds: its beacons went unread and the access point dropped us */
+            if (pl_country(pc_order[pb.cur++]))
                 pl_fail("places: flash write");
-                return;
-            }
+            break;
+        }
         if (pb.pass < pb.passes) {
             pb.pass++;
             bbuf_used = 0;
@@ -763,5 +784,6 @@ static void places_refresh(void)
     plat_data_erase(RGP_OFF);
     rg = 0;
     pb.state = PB_IDLE;
+    pl_first = 1;
     ui_dirty = 1;
 }

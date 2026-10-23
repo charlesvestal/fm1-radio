@@ -25,6 +25,7 @@ static int32_t sel_station = -1;                  /* in the place's list, when i
 static char st_id[12], st_title[32];              /* the station chosen (kept, so it plays before a fetch) */
 static char play_url[80];                         /* its listen link: radio_url points here */
 static uint8_t radio_want;                        /* PLAY's: the radio should be on (kept across a power cycle) */
+static int places_busy(void);                     /* places.c: the places being fetched (no stream meanwhile) */
 enum { TW_NONE, TW_PLACE, TW_STATION };
 static uint8_t tune_want;                         /* what to do once the turning has stopped */
 static uint32_t tune_at;                          /* when (ms) */
@@ -167,7 +168,7 @@ static void radio_ui_service(void)
         }
     }
     if (radio_want && (radio_st == RS_OFF || (radio_st == RS_ERROR && !radio_unplayable)) && play_url[0] &&
-        wifi_st == WS_CONNECTED && !radio_net_running() && !tune_want && !fetch_busy &&
+        wifi_st == WS_CONNECTED && !radio_net_running() && !tune_want && !fetch_busy && !places_busy() &&
         !(fetch_want && fetch_then_tune)) {
         static uint32_t last_try;
         if (radio_st == RS_OFF || plat_ms() - last_try > 10000u) {   /* a stopped stream: try again now and then */
