@@ -6,10 +6,11 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
-Release 1.1 is a pre-release: install it from <https://charlesvestal.github.io/fm1-radio/install/> (Chrome or Edge,
-the FM-1 on USB). It fixes what made 1.0 withdrawn (WiFi dropping while the places loaded, the heap running out
-overnight or after WiFi went off and on, a loud buzz on plain AAC stations) and adds favorites and a small synth. If
-your FM-1 crashed with 1.0, please try 1.1, and if it still does, send the installer page's "Report a problem".
+Release 1.2 is a pre-release: install it from <https://charlesvestal.github.io/fm1-radio/install/> (Chrome or Edge,
+the FM-1 on USB). 1.1 fixed what made 1.0 withdrawn (WiFi dropping while the places loaded, the heap running out
+overnight or after WiFi went off and on, a loud buzz on plain AAC stations) and added favorites and a small synth;
+1.2 joins WiFi more reliably on a weak signal, joins hidden networks, and keeps WiFi up while an HTTPS station connects. If your FM-1
+crashes or won't stay on your WiFi, please send the installer page's "Report a problem".
 
 - **Try it in your browser** (no FM-1 needed; it plays the stations, effects and all, through Radio's own decoders;
   Radio Garden's lists come through a small proxy, `app/web/proxy/`, as its site answers no other):
@@ -96,6 +97,9 @@ On the FM-1 itself:
    its password.
 5. Type the password on the keys and press **PLAY** to save it and join. **HOME** cancels.
 
+For a hidden network, choose **Other...** (at the top while it scans, at the bottom after), type the network's
+name and press **PLAY**, then its password (none for an open network) and **PLAY** again.
+
 The keys type left to right, every key in turn, black ones too: the first 26 are a to z, and the last
 key deletes.
 
@@ -104,8 +108,8 @@ key deletes.
 
 The screen shows a small keyboard with what each key types.
 
-The FM-1 keeps six networks, the most recent first. With networks saved, it turns WiFi on at start and joins
-the first one it finds. To forget one, list them with `python3 base/tools/fm1_remote.py wifi saved`, then
+The FM-1 keeps six networks, the most recent first. With networks saved, it turns WiFi on at start, scans, and joins
+the strongest saved network it hears (hearing none, it tries each saved one in turn). To forget one, list them with `python3 base/tools/fm1_remote.py wifi saved`, then
 `wifi forget N`.
 
 ### Listening

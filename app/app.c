@@ -85,7 +85,7 @@ static void rset_save(void) { plat_store_save(OBJ_RADIO, &rset, sizeof rset); }
 
 /* ---- the networks around: fm1-base's scan, copied when a scan's results arrive */
 #define SCAN_N 12
-typedef struct { char ssid[33]; int8_t rssi; uint8_t secured, saved; } scan_t;
+typedef struct { char ssid[33]; int8_t rssi; uint8_t secured, saved, channel; } scan_t;
 static scan_t scan_list[SCAN_N];
 static int scan_n = -1;                           /* -1: none yet */
 static uint32_t scans_seen;
@@ -101,6 +101,7 @@ static void scan_refresh(void)
             break;
         s->rssi = (int8_t)rssi;
         s->secured = (uint8_t)sec;
+        s->channel = (uint8_t)plat_wifi_found_channel(scan_n);
         s->saved = (uint8_t)plat_wifi_kept(s->ssid);
     }
 }
@@ -273,12 +274,13 @@ static void ui_nets(void)
     int i;
     ui_title(0, "Networks", "SEL  scan again");
     if (scan_n < 0) {
-        ui_row(1, 40, 20, ui_scan_t ? "Scanning..." : "", "", K_DIM, K_DIM, K_BG);
-        for (i = 1; i < 7; i++)
+        ui_row(1, 40, 20, "Other...", "", K_DIM, K_CORAL, K_PANEL);   /* (a hidden network: no need to wait) */
+        ui_row(2, 60, 20, ui_scan_t ? "Scanning..." : "", "", K_DIM, K_DIM, K_BG);
+        for (i = 2; i < 7; i++)
             ui_row(1 + i, 40 + 20u * (uint32_t)i, 20, "", "", K_DIM, K_DIM, K_BG);
     } else {
-        if (ui_sel >= scan_n)
-            ui_sel = scan_n ? scan_n - 1 : 0;
+        if (ui_sel > scan_n)
+            ui_sel = scan_n;
         if (ui_sel < ui_top)
             ui_top = ui_sel;
         if (ui_sel >= ui_top + 7)
@@ -292,26 +294,29 @@ static void ui_nets(void)
                 scan_t *s = &scan_list[k];
                 ssid_show(ss, s->ssid, 17);
                 snprintf(l, sizeof l, "%s%s", s->saved ? "* " : "", ss);
-                snprintf(r, sizeof r, "%d %s", s->rssi, s->secured ? "lock" : "open");
+                snprintf(r, sizeof r, "%d ch %u %s", s->rssi, s->channel, s->secured ? "lock" : "open");
                 if (w_eq(s->ssid, plat_wifi_ssid()) && wifi_st == WS_CONNECTED)
                     fg = K_TEAL;
                 if (k == ui_sel)
                     bg = K_PANEL;
-            } else if (k == 0) {
-                snprintf(l, sizeof l, "No networks found");
+            } else if (k == scan_n) {             /* a hidden network: its name typed */
+                snprintf(l, sizeof l, "Other...");
                 fg = K_DIM;
+                if (k == ui_sel)
+                    bg = K_PANEL;
             }
             ui_row(1 + i, 40 + 20u * (uint32_t)i, 20, l, r, fg, k == ui_sel ? K_CORAL : K_DIM, bg);
         }
     }
     ui_row(12, 184, 28, ui_msg, "", K_CORAL, K_DIM, K_BG);
-    ui_row(13, 214, 26, "PLAY join  SAVE password", "HOME back", K_DIM, K_DIM, K_PANEL);
+    ui_row(13, 214, 26, "PLAY join  SAVE password", "HOME", K_DIM, K_DIM, K_PANEL);
 }
 
 /* ---- the password page: the 27 keys type (F3 = a ... E5 = z, G5 = delete); hold OCT- for capitals, OCT+ for
  * digits (F3 .. D4) and space / symbols (D#4 .. F#5) */
 static char pw_ssid[33], pw_buf[64];
 static int pw_len;
+static uint8_t pw_other;                          /* Other...: 1 its name typed first, 2 then its password */
 static uint32_t pw_keys;                          /* held, for the drawing */
 static const char PW_SYM[] = " !@#$%&*-_.,?+/:";
 
@@ -332,6 +337,7 @@ static void pw_open(const char *ssid)             /* (a kept password is not sho
     w_cpy(pw_ssid, ssid, sizeof pw_ssid);
     pw_buf[0] = 0;
     pw_len = 0;
+    pw_other = !ssid[0];
     ui_page = PG_PASS;
     ui_dirty = 1;
     ui_msg[0] = 0;
@@ -392,8 +398,8 @@ static void ui_pass(void)
 {
     char ss[33], shown[24];
     int layer = pw_layer(plat_buttons());
-    ssid_show(ss, pw_ssid, 22);
-    ui_title(0, "Password", "");
+    ssid_show(ss, pw_other == 1 ? "a hidden network" : pw_ssid, 22);
+    ui_title(0, pw_other == 1 ? "Network name" : "Password", "");
     ui_row(1, 40, 22, ss, "", K_DIM, K_DIM, K_BG);
     {   /* the end of what is typed, with a cursor */
         int from = pw_len > 21 ? pw_len - 21 : 0;
@@ -404,7 +410,7 @@ static void ui_pass(void)
            "OCT- caps  OCT+ 123", layer ? K_CORAL : K_DIM, K_DIM, K_BG);
     ui_piano(4, 128, layer, pw_keys);
     ui_row(12, 184, 28, ui_msg, "", K_CORAL, K_DIM, K_BG);
-    ui_row(13, 214, 26, "PLAY  save + join", "HOME  cancel", K_DIM, K_DIM, K_PANEL);
+    ui_row(13, 214, 26, pw_other == 1 ? "PLAY  next" : "PLAY  save + join", "HOME  cancel", K_DIM, K_DIM, K_PANEL);
 }
 
 static const char *places_status(char *b, unsigned max);   /* places.c */
@@ -810,26 +816,28 @@ static void input(void)
         if (down & (1u << B_HOME))
             ui_page_set(PG_HOME);
     } else if (ui_page == PG_NETS) {
-        if (turn && scan_n > 0) {
+        if (turn && scan_n >= 0) {
             ui_sel += turn;
             if (ui_sel < 0)
                 ui_sel = 0;
-            if (ui_sel >= scan_n)
-                ui_sel = scan_n - 1;
+            if (ui_sel > scan_n)
+                ui_sel = scan_n;              /* (the last row: Other...) */
         }
         if (down & (1u << B_SEL))
             ui_scan();
         if (down & (1u << B_HOME))
             ui_page_set(PG_WIFI);
-        if ((down & (1u << B_PLAY)) && scan_n > 0) {
+        if ((down & (1u << B_PLAY | 1u << B_SAVE)) && (scan_n < 0 || ui_sel >= scan_n)) {
+            pw_open("");                          /* Other...: a hidden network's name, then its password */
+        } else if ((down & (1u << B_PLAY)) && scan_n > 0) {
             scan_t *s = &scan_list[ui_sel];
             if (wifi_join_ssid(s->ssid, s->secured) == 0)
                 ui_page_set(PG_WIFI);
             else
                 pw_open(s->ssid);
-        }
-        if ((down & (1u << B_SAVE)) && scan_n > 0)
+        } else if ((down & (1u << B_SAVE)) && scan_n > 0) {
             pw_open(scan_list[ui_sel].ssid);
+        }
     } else if (ui_page == PG_PASS) {
         uint32_t keys = plat_keys(), kdown = keys & ~pw_keys;
         int k;
@@ -839,8 +847,17 @@ static void input(void)
                 pw_key(k, pw_layer(now));
         if (down & (1u << B_HOME))
             ui_page_set(PG_NETS);
-        if (down & (1u << B_PLAY)) {
-            if (pw_len < 8) {
+        if ((down & (1u << B_PLAY)) && pw_other == 1) {
+            if (pw_len) {                         /* the name: now its password */
+                w_cpy(pw_ssid, pw_buf, sizeof pw_ssid);
+                pw_buf[0] = 0;
+                pw_len = 0;
+                pw_other = 2;
+                ui_msg[0] = 0;
+                ui_dirty = 1;
+            }
+        } else if (down & (1u << B_PLAY)) {
+            if (pw_len < 8 && !(pw_other && !pw_len)) {   /* (a hidden network may be open: no password) */
                 snprintf(ui_msg, sizeof ui_msg, "WPA passwords are 8+ characters");
             } else {
                 wifi_join_to(pw_ssid, pw_buf);    /* kept once it joins */
@@ -967,7 +984,7 @@ static void lights(void)
     } else if (ui_page == PG_WIFI) {
         lb = 1u << B_PLAY | 1u << B_SEL | 1u << B_HOME | 1u << B_GLO;
     } else if (ui_page == PG_NETS) {
-        lb = 1u << B_SEL | 1u << B_HOME | (scan_n > 0 ? 1u << B_PLAY | 1u << B_SAVE : 0u);
+        lb = 1u << B_SEL | 1u << B_HOME | 1u << B_PLAY | 1u << B_SAVE;
     } else if (ui_page == PG_PASS) {
         lb = 1u << B_PLAY | 1u << B_HOME | 1u << B_OCTDN | 1u << B_OCTUP;
         lk = (1u << NKEYS) - 1u;
