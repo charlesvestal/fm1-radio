@@ -15,9 +15,12 @@
 #define FM1B_TRS 0                       /* no MIDI in from the jack: a radio (the flash goes to the places) */
 
 /* the store: the panel calibration (the platform's), the radio's address and calibration (OBJ_BLE), the networks
- * kept (OBJ_WIFI), the station of the last session (OBJ_RADIO) */
-enum { OBJ_PANEL, OBJ_BLE, OBJ_WIFI, OBJ_RADIO, OBJ_NOBJ };
-#define APP_STORE_MAP {0xDC000u, 0xDE000u, 0xDA000u, 0xD8000u}
+ * kept (OBJ_WIFI), the station of the last session and the synth's settings (OBJ_RADIO), the favorites (OBJ_FAV:
+ * the places area ends below it) */
+enum { OBJ_PANEL, OBJ_BLE, OBJ_WIFI, OBJ_RADIO, OBJ_FAV, OBJ_NOBJ };
+#define APP_STORE_MAP {0xDC000u, 0xDE000u, 0xDA000u, 0xD8000u, 0xD6000u}
+#define APP_HOST_EXPECT                  /* the host simulator's "expect" asks app_expect (app.c) first */
+int app_expect(const char *what, int *got);
 
 /* the contract: the platform calls these */
 void app_init(void);

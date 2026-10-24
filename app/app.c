@@ -55,20 +55,31 @@ static const char *wifi_status_str(void)
     return wifi_st < 7u ? S[wifi_st] : "?";
 }
 
-/* ---- the station of the last session (OBJ_RADIO) */
+#include "synth.c"
+
+/* ---- the station of the last session (OBJ_RADIO), and the synth's settings (saved before them: older saves
+ * end at st_title, and load with the synth at its defaults) */
 #define RSET_MAGIC 0x52414431u                    /* "RAD1" */
 static struct {
     uint32_t magic;
     uint8_t playing, rsv;
     uint16_t country;
     char place[32], st_id[12], st_title[32];
+    synth_set_t syn;
 } rset;
 static void rset_load(void)
 {
-    if (plat_store_load(OBJ_RADIO, &rset, sizeof rset) != (int)sizeof rset || rset.magic != RSET_MAGIC) {
+    int n = plat_store_load(OBJ_RADIO, &rset, sizeof rset);
+    int old = (int)((char *)&rset.syn - (char *)&rset);
+    if (n < old || rset.magic != RSET_MAGIC) {
         memset(&rset, 0, sizeof rset);
         rset.magic = RSET_MAGIC;
+        n = 0;
     }
+    if (n < (int)sizeof rset)
+        rset.syn = SYN_DEFAULT;
+    syn = rset.syn;
+    synth_init();
 }
 static void rset_save(void) { plat_store_save(OBJ_RADIO, &rset, sizeof rset); }
 
@@ -181,7 +192,7 @@ static void tempo_tap(void)
 #define K_CORAL RGB(242, 120, 72)
 #define K_TEAL RGB(38, 166, 154)
 
-enum { PG_HOME, PG_BROWSE, PG_WIFI, PG_NETS, PG_PASS, PG_HELP };
+enum { PG_HOME, PG_BROWSE, PG_WIFI, PG_NETS, PG_PASS, PG_HELP, PG_SYNTH, PG_FAV };
 static uint8_t ui_page, ui_dirty = 1;
 static int ui_sel, ui_top;
 static uint32_t ui_scan_t;                        /* the scan asked for (ms), 0 = none waiting */
@@ -350,9 +361,9 @@ static void ui_piano(int slot, uint32_t y, int layer, uint32_t held)
     cv_begin(240, (uint32_t)wh + 2u, K_BG);
     for (k = 0; k < 27; k++)                      /* white keys first, then the black ones over them */
         if (!BLACK[k % 12]) {
-            char t[3] = {pw_char(k, layer), 0, 0};
+            char t[3] = {layer < 0 ? 0 : pw_char(k, layer), 0, 0};
             int x = x0 + wi * kw;
-            if (!t[0])
+            if (!t[0] && layer >= 0)
                 t[0] = '<';
             cv_rect(x, 0, kw - 1, wh, (held >> k & 1u) ? K_CORAL : RGB(255, 255, 255));
             cv_rect(x + kw - 1, 0, 1, wh, K_LINE);
@@ -367,7 +378,7 @@ static void ui_piano(int slot, uint32_t y, int layer, uint32_t held)
             continue;
         }
         {
-            char t[2] = {pw_char(k, layer), 0};
+            char t[2] = {layer < 0 ? 0 : pw_char(k, layer), 0};
             int x = x0 + wi * kw - 6;
             cv_rect(x, 0, 12, bh, (held >> k & 1u) ? K_CORAL : K_TEXT);
             cv_text(x + (12 - text_w(&FONT_XS, t)) / 2, 6, &FONT_XS, t, RGB(255, 255, 255));
@@ -396,8 +407,142 @@ static void ui_pass(void)
 }
 
 static const char *places_status(char *b, unsigned max);   /* places.c */
+#include "fav.c"
 #include "radio_ui.c"
 #include "places.c"
+
+static void ui_page_set(int pg);
+
+/* ---- the Synth page (ARP): the keys play app/synth.c over the radio */
+static uint32_t syn_keys;                         /* held, as last seen */
+static int8_t syn_key_note[NKEYS];                /* the note each held key started (an octave change between
+                                                   * its down and up must not leave it sounding) */
+static uint8_t syn_changed;                       /* settings changed since the page opened: saved on leaving */
+
+static void ui_synth_wave(int slot, uint32_t y)   /* the wave's shape, and the level */
+{
+    char key[80], lv[24];
+    int i;
+    snprintf(lv, sizeof lv, "level %u%%", (unsigned)(syn.level * 100u / 127u));
+    snprintf(key, sizeof key, "W%u|%s|%d", syn.wave, lv, radio_st == RS_PLAYING);
+    if (w_eq(ui_key[slot], key))
+        return;
+    memcpy(ui_key[slot], key, sizeof key);
+    cv_begin(240, 24, K_BG);
+    {
+        float m = (float)syn.wave * (3.0f / 127.0f), t;
+        int s = (int)m;
+        if (s > 2)
+            s = 2;
+        t = m - (float)s;
+        for (i = 0; i < 96; i++) {
+            float ph = (float)i / 96.0f;
+            float v = syn_shape(s, ph, 0.0f) * (1.0f - t) + syn_shape(s + 1, ph, 0.0f) * t;
+            cv_rect(16 + i, 12 - (int32_t)(v * 9.0f), 1, 2, K_TEAL);
+        }
+    }
+    cv_text(224 - text_w(&FONT_S, lv), (24 - (int32_t)FONT_S.h) / 2, &FONT_S, lv, K_TEXT);
+    cv_blit(0, y);
+}
+
+static void ui_synth(void)
+{
+    static const char *const WV[4] = {"sine", "triangle", "saw", "square"};
+    char a[24], b[24], c[24], d[24], o[16];
+    snprintf(a, sizeof a, "%s", WV[(syn.wave * 3 + 63) / 127]);
+    snprintf(b, sizeof b, "%u Hz", (unsigned)synth_cutoff_hz());
+    snprintf(c, sizeof c, "%u ms", (unsigned)synth_attack_ms());
+    snprintf(d, sizeof d, "%u ms", (unsigned)synth_release_ms());
+    snprintf(o, sizeof o, "OCT %+d", syn.octave);
+    ui_title(0, "Synth", o);
+    ui_cell(1, 8, 42, "K1", "WAVE", a, 0);
+    ui_cell(2, 120, 42, "K2", "FILTER", b, 0);
+    ui_cell(3, 8, 88, "K3", "ATTACK", c, 0);
+    ui_cell(4, 120, 88, "K4", "RELEASE", d, 0);
+    ui_synth_wave(5, 136);
+    ui_piano(6, 164, -1, syn_keys);
+    ui_row(13, 214, 26, "SELECT level  OCT-/+", "HOME back", K_DIM, K_DIM, K_PANEL);
+}
+
+static int syn_knob(uint8_t *v, int32_t d)       /* a knob's detents, 2 steps each, 0..127; changed? */
+{
+    int32_t x = (int32_t)*v + 2 * d;
+    if (!d)
+        return 0;
+    x = x < 0 ? 0 : x > 127 ? 127 : x;
+    if (x == *v)
+        return 0;
+    *v = (uint8_t)x;
+    return 1;
+}
+
+static void synth_leave(void)                     /* back to Home: notes let go, the settings kept */
+{
+    synth_all_off();
+    syn_keys = 0;
+    if (syn_changed) {
+        syn_changed = 0;
+        rset.syn = syn;
+        rset_save();
+    }
+    ui_page_set(PG_HOME);
+}
+
+/* ---- the Favorites page (SAVE) */
+static void fav_open(void)
+{
+    if (!(fav = malloc(sizeof *fav))) {
+        snprintf(ui_msg, sizeof ui_msg, "no memory for favorites");
+        return;
+    }
+    if (!fav_valid(fav, plat_store_load(OBJ_FAV, fav, sizeof *fav)))
+        fav_clear(fav);
+    fav_sel = 0;
+    ui_top = 0;
+    ui_page_set(PG_FAV);
+}
+static void fav_close(void)
+{
+    free(fav);
+    fav = 0;
+    ui_page_set(PG_HOME);
+}
+static void fav_save(void) { plat_store_save(OBJ_FAV, fav, sizeof *fav); }
+
+static void ui_fav(void)
+{
+    char a[48], p[24], c[16];
+    int i;
+    if (!fav)
+        return;
+    if (fav_sel < ui_top)
+        ui_top = fav_sel;
+    if (fav_sel >= ui_top + 8)
+        ui_top = fav_sel - 7;
+    snprintf(c, sizeof c, "%u / %u", (unsigned)fav->n, FAV_MAX);
+    ui_title(0, "Favorites", c);
+    for (i = 0; i < 8; i++) {
+        int r = ui_top + i;
+        uint16_t bg = r == fav_sel ? K_PANEL : K_BG;
+        uint32_t y = 40u + 21u * (uint32_t)i;
+        if (r == 0) {
+            if (fav->n >= FAV_MAX)
+                snprintf(a, sizeof a, "Favorites full (%u)", FAV_MAX);
+            else
+                snprintf(a, sizeof a, "+ Add %.20s", st_title[0] ? st_title : "(no station)");
+            ui_row(1 + i, y, 21, a, "", fav_can_add() ? K_TEAL : K_DIM, K_DIM, bg);
+        } else if (r <= (int)fav->n) {
+            const fav_t *e = &fav->f[r - 1];
+            snprintf(a, sizeof a, "%.18s", e->title);
+            snprintf(p, sizeof p, "%.12s", e->place);
+            ui_row(1 + i, y, 21, a, p, K_TEXT, K_DIM, bg);
+        } else {
+            ui_row(1 + i, y, 21, "", "", K_TEXT, K_DIM, K_BG);
+        }
+    }
+    ui_row(13, 214, 26, fav_sel ? "SEL play  REC delete" : "SEL add", ui_msg[0] ? ui_msg : "HOME back", K_DIM,
+           K_DIM, K_PANEL);
+}
 
 static void ui_draw(void)
 {
@@ -414,6 +559,8 @@ static void ui_draw(void)
     case PG_WIFI: ui_status(); break;
     case PG_NETS: ui_nets(); break;
     case PG_PASS: ui_pass(); break;
+    case PG_SYNTH: ui_synth(); break;
+    case PG_FAV: ui_fav(); break;
     default: ui_help(); break;
     }
 }
@@ -618,6 +765,15 @@ static void input(void)
             tempo_tap();
         if (down & (1u << B_PLAY))
             radio_toggle();
+        if (down & (1u << B_ARP)) {
+            syn_keys = 0;
+            ui_page_set(PG_SYNTH);
+            return;
+        }
+        if (down & (1u << B_SAVE)) {
+            fav_open();
+            return;
+        }
         if ((down & (1u << B_SEL)) && sel_valid()) {
             br_open();
             ui_page_set(PG_BROWSE);
@@ -688,9 +844,101 @@ static void input(void)
                 ui_page_set(PG_WIFI);
             }
         }
+    } else if (ui_page == PG_SYNTH) {
+        uint32_t keys = plat_keys(), on = keys & ~syn_keys, off = syn_keys & ~keys;
+        int k, ch = 0;
+        syn_keys = keys;
+        for (k = 0; k < NKEYS; k++) {
+            if (off >> k & 1u)
+                synth_note_off(syn_key_note[k]);
+            if (on >> k & 1u) {
+                syn_key_note[k] = (int8_t)(53 + k + 12 * syn.octave);   /* F3 = MIDI 53 */
+                synth_note_on(syn_key_note[k]);
+            }
+        }
+        ch |= syn_knob(&syn.wave, plat_enc(EN_K1));
+        ch |= syn_knob(&syn.cutoff, plat_enc(EN_K2));
+        ch |= syn_knob(&syn.attack, plat_enc(EN_K3));
+        ch |= syn_knob(&syn.release, plat_enc(EN_K4));
+        ch |= syn_knob(&syn.level, turn);
+        if ((down & (1u << B_OCTDN)) && syn.octave > -2)
+            syn.octave--, ch = 1;
+        if ((down & (1u << B_OCTUP)) && syn.octave < 2)
+            syn.octave++, ch = 1;
+        if (ch) {
+            synth_update();
+            syn_changed = 1;
+        }
+        if (down & ((1u << B_HOME) | (1u << B_ARP)))
+            synth_leave();
+    } else if (ui_page == PG_FAV && fav) {
+        int n = (int)fav->n + 1;
+        if (turn) {
+            fav_sel += turn;
+            fav_sel = fav_sel < 0 ? 0 : fav_sel >= n ? n - 1 : fav_sel;
+        }
+        if (down & (1u << B_SEL)) {
+            if (fav_sel == 0) {
+                if (fav_can_add()) {
+                    fav_t e;
+                    fav_entry(&e);
+                    if (fav_add(fav, &e) == 0) {
+                        fav_save();
+                        fav_sel = (int)fav->n;
+                    }
+                }
+            } else if (fav_tune(&fav->f[fav_sel - 1]) == 0) {
+                fav_close();
+                return;
+            } else {
+                snprintf(ui_msg, sizeof ui_msg, "place gone");
+            }
+        }
+        if ((down & (1u << B_REC)) && fav_sel > 0) {
+            fav_del(fav, (uint32_t)(fav_sel - 1));
+            fav_save();
+            if (fav_sel > (int)fav->n)
+                fav_sel = (int)fav->n;
+        }
+        if (down & ((1u << B_HOME) | (1u << B_SAVE)))
+            fav_close();
     }
 }
 void app_input_only(void) { input(); }
+
+#ifdef PLAT_HOST
+int app_expect(const char *what, int *got)       /* the host simulator's checks (the .host scripts in tests) */
+{
+    int i, n = 0;
+    if (!strcmp(what, "page"))
+        *got = ui_page;
+    else if (!strcmp(what, "syn_wave"))
+        *got = syn.wave;
+    else if (!strcmp(what, "syn_cutoff"))
+        *got = syn.cutoff;
+    else if (!strcmp(what, "syn_attack"))
+        *got = syn.attack;
+    else if (!strcmp(what, "syn_release"))
+        *got = syn.release;
+    else if (!strcmp(what, "syn_level"))
+        *got = syn.level;
+    else if (!strcmp(what, "syn_octave"))
+        *got = syn.octave;
+    else if (!strcmp(what, "syn_voices")) {
+        for (i = 0; i < SYN_VOICES; i++)
+            n += syv[i].on;
+        *got = n;
+    } else if (!strcmp(what, "fav_open")) {
+        *got = fav != 0;
+    } else if (!strcmp(what, "fav_n")) {
+        *got = fav ? (int)fav->n : -1;
+    } else if (!strcmp(what, "fav_sel")) {
+        *got = fav_sel;
+    } else
+        return 0;
+    return 1;
+}
+#endif
 
 /* light what does something here: the page's buttons, and the keys while they type */
 static void lights(void)
@@ -715,6 +963,12 @@ static void lights(void)
         lb = 1u << B_PLAY | 1u << B_HOME | 1u << B_OCTDN | 1u << B_OCTUP;
         lk = (1u << NKEYS) - 1u;
     }
+    if (ui_page == PG_SYNTH) {
+        lb = 1u << B_HOME | 1u << B_ARP | 1u << B_OCTDN | 1u << B_OCTUP;
+        lk = ((1u << NKEYS) - 1u) & ~syn_keys;    /* the keys lit, the held ones off */
+    }
+    if (ui_page == PG_FAV)
+        lb = 1u << B_SEL | 1u << B_HOME | 1u << B_SAVE | (fav_sel > 0 ? 1u << B_REC : 0u);
     plat_leds(lb, lk);
 }
 

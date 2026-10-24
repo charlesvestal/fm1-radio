@@ -262,7 +262,7 @@ static const char CONTS[] =
         "Venezuela\0"
         "\0";
 #define RGP_OFF PLAT_DATA_LO                       /* the table: 0x97000 .. */
-#define RGP_END 0xD8000u                           /* .. OBJ_RADIO's sectors (app.h) */
+#define RGP_END 0xD6000u                           /* .. OBJ_FAV's sectors (app.h): 258 KB for a table of ~130 */
 #define PC_MAX 250u
 #define CONT_MAX 8u
 

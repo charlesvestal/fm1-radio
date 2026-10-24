@@ -1,0 +1,15 @@
+# the Favorites page: SAVE opens it, HOME closes it; with no places table (the host has none) nothing to add
+wait 500
+expect page 0
+tap SAVE
+wait 50
+expect page 7
+expect fav_open 1
+expect fav_n 0
+tap SEL
+wait 50
+expect fav_n 0
+tap HOME
+wait 50
+expect page 0
+expect fav_open 0

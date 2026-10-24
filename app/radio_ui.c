@@ -122,6 +122,37 @@ static void station_tune(void)                    /* st_id as the stream to play
     radio_remember();
 }
 
+/* ---- favorites (app/fav.c): the current station as one, and one tuned as the start restores the last */
+static int fav_can_add(void)
+{
+    return fav && sel_valid() && st_id[0] && fav_find(fav, st_id) < 0 && fav->n < FAV_MAX;
+}
+static void fav_entry(fav_t *e)
+{
+    memset(e, 0, sizeof *e);
+    e->country = sel_country;
+    w_cpy(e->place, place_name, sizeof e->place);
+    w_cpy(e->st_id, st_id, sizeof e->st_id);
+    w_cpy(e->title, st_title, sizeof e->title);
+}
+static int fav_tune(const fav_t *e)               /* 0 tuned; -1 its place is gone from the table */
+{
+    int32_t p;
+    if (!sel_valid() || e->country >= rg->n_country || (p = rg_place_index(e->country, e->place)) < 0)
+        return -1;
+    sel_country = e->country;
+    sel_cont = rg_country(sel_country)->cont;
+    sel_place = (uint16_t)p;
+    place_load();
+    w_cpy(st_id, e->st_id, sizeof st_id);
+    w_cpy(st_title, e->title, sizeof st_title);
+    tune_want = TW_NONE;
+    radio_want = 1;
+    station_tune();                               /* the old stream stopped; this one starts once the network is
+                                                   * free (radio_ui_service), and is remembered as the last */
+    return 0;
+}
+
 /* the main loop's: tune, fetch, start and stop as asked, once the network side is free */
 static void radio_ui_service(void)
 {
@@ -461,14 +492,14 @@ static int br_up(void)
 /* ---- held HOME: the controls */
 static void ui_help(void)
 {
-    static const char *const L[8][2] = {
+    static const char *const L[9][2] = {
         {"KNOB 1..4", "continent .. station"}, {"SELECT", "next station"}, {"SEL", "browse the world"},
-        {"PLAY", "play / stop"}, {"GLO", "WiFi, networks"}, {"MASTER", "volume"},
-        {"keys / FX", "hold for FX / tap tempo"}, {"", ""}};
+        {"PLAY", "play / stop"}, {"SAVE", "favorites"}, {"ARP", "synth on the keys"}, {"GLO", "WiFi, networks"},
+        {"MASTER", "volume"}, {"keys / FX", "hold for FX / tap tempo"}};
     int i;
     ui_title(0, "Controls", "");
-    for (i = 0; i < 7; i++)
-        ui_row(1 + i, 40 + 24u * (uint32_t)i, 24, L[i][0], L[i][1], K_TEXT, K_DIM, K_BG);
+    for (i = 0; i < 9; i++)
+        ui_row(1 + i, 40 + 19u * (uint32_t)i, 19, L[i][0], L[i][1], K_TEXT, K_DIM, K_BG);
     ui_row(13, 214, 26, "let go of HOME", "", K_DIM, K_DIM, K_PANEL);
 }
 
@@ -484,4 +515,8 @@ static void radio_ui_dump(void)
     snprintf(b, sizeof b, "list %s %u  fetch %u/%u state %d %s", list_here() ? "here" : "-", (unsigned)rgn_n,
              fetch_want, fetch_busy, rgn_state, rgn_why);
     wire_line(b);
+    if (fav) {
+        snprintf(b, sizeof b, "fav %u sel %d", (unsigned)fav->n, fav_sel);
+        wire_line(b);
+    }
 }

@@ -1,0 +1,54 @@
+# the Synth page: ARP opens it, keys sound over the radio (none on the host: no network), knobs set, kept
+wait 500
+expect page 0
+master 4096
+tap ARP
+wait 50
+expect page 6
+peakreset
+wait 200
+expect peak_db_max -90
+key 12 down
+wait 300
+expect syn_voices 1
+expect peak_db_min -30
+key 12 up
+wait 1500
+expect syn_voices 0
+spin K1 10
+wait 50
+expect syn_wave 62
+spin K2 20
+spin SELECT 30
+wait 50
+expect syn_cutoff 127
+expect syn_level 127
+key 0 down
+key 4 down
+key 7 down
+key 12 down
+peakreset
+wait 500
+expect syn_voices 4
+expect peak_db_max 0.1
+key 0 up
+key 4 up
+key 7 up
+key 12 up
+tap OCT+
+tap OCT+
+tap OCT+
+wait 50
+expect syn_octave 2
+key 3 down
+wait 100
+tap HOME
+wait 1500
+expect page 0
+expect syn_voices 0
+key 3 up
+reboot
+wait 500
+expect syn_wave 62
+expect syn_octave 2
+expect syn_level 127

@@ -11,7 +11,7 @@
  * Part of the app's unity build (app.c). */
 #define RG_MAGIC 0x31504752u                      /* "RGP1" */
 #define RG_OFF PLAT_DATA_LO                       /* where it is: places.c RGP_OFF */
-#define RG_MAX (0xD8000u - PLAT_DATA_LO)          /* .. OBJ_RADIO's sectors */
+#define RG_MAX (0xD6000u - PLAT_DATA_LO)          /* .. OBJ_FAV's sectors (app.h) */
 static uint32_t pl_crc(const uint8_t *p, uint32_t n);
 
 typedef struct {

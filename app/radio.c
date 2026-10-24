@@ -615,6 +615,11 @@ static void radio_render(int32_t *o, uint32_t n)
         }
         if (playing)
             fx_process(&l, &rr);
+        {   /* the synth over it (app/synth.c), the sum held to full scale */
+            float sy = synth_next();
+            l = fm_clampf(l + sy, -1.0f, 1.0f);
+            rr = fm_clampf(rr + sy, -1.0f, 1.0f);
+        }
         o[2u * i] = (int32_t)(l * gain);
         o[2u * i + 1u] = (int32_t)(rr * gain);
     }
