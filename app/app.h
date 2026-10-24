@@ -12,6 +12,7 @@
 #define APP_BLOCK 256u
 #define APP_CANVAS_PX (240u * 48u)       /* a row at a time: WiFi's buffers need the pool (fm1-base gfx.c) */
 #define APP_BIG_FONT FONT_M             /* the splash and the panel's screens: L's 20 KB go to the places */
+#define FM1B_UAC_RING_POOL 1             /* USB audio's ring in the pool: the RAM is full (fm1-base unity.c) */
 #define FM1B_TRS 0                       /* no MIDI in from the jack: a radio (the flash goes to the places) */
 
 /* the store: the panel calibration (the platform's), the radio's address and calibration (OBJ_BLE), the networks

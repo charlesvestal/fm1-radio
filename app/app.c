@@ -198,12 +198,13 @@ static int ui_sel, ui_top;
 static uint32_t ui_scan_t;                        /* the scan asked for (ms), 0 = none waiting */
 static char ui_msg[40];
 #define UI_ROWS 14
-static char ui_key[UI_ROWS][80] __attribute__((section(".pool")));
+#define UI_KEY 72                         /* a row's summary, to skip drawing it unchanged (72: the pool is full) */
+static char ui_key[UI_ROWS][UI_KEY] __attribute__((section(".pool")));
 
 static void ui_row(int slot, uint32_t y, uint32_t h, const char *l, const char *r, uint16_t lc, uint16_t rc,
                    uint16_t bg)
 {
-    char key[80];
+    char key[UI_KEY];
     int32_t rw;
     snprintf(key, sizeof key, "%u%s|%s|%x%x%x", (unsigned)y, l, r, lc, rc, bg);
     if (slot < UI_ROWS) {
@@ -219,7 +220,7 @@ static void ui_row(int slot, uint32_t y, uint32_t h, const char *l, const char *
 }
 static void ui_title(int slot, const char *t, const char *hint)
 {
-    char key[80];
+    char key[UI_KEY];
     snprintf(key, sizeof key, "T%s|%s", t, hint);
     if (w_eq(ui_key[slot], key))
         return;
@@ -351,7 +352,7 @@ static void pw_key(int k, int layer)
 static void ui_piano(int slot, uint32_t y, int layer, uint32_t held)
 {
     static const uint8_t BLACK[12] = {0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0};   /* from F */
-    char key[80];
+    char key[UI_KEY];
     int k, wi = 0;
     const int kw = 14, x0 = 8, wh = 44, bh = 26;
     snprintf(key, sizeof key, "P%d%x", layer, (unsigned)held);
@@ -423,7 +424,7 @@ static uint32_t syn_changed_t;
 
 static void ui_synth_wave(int slot, uint32_t y)   /* the wave's shape, and the level */
 {
-    char key[80], lv[24];
+    char key[UI_KEY], lv[24];
     int i;
     snprintf(lv, sizeof lv, "level %u%%", (unsigned)(syn.level * 100u / 127u));
     snprintf(key, sizeof key, "W%u|%s|%d", syn.wave, lv, radio_st == RS_PLAYING);

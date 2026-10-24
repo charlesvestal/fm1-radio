@@ -6,8 +6,10 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
-Release 1.0 is withdrawn for now: on some FM-1s it crashes when WiFi starts or while it is loading the places.
-A new release follows once that is fixed. Until then, it can be built from source (below).
+Release 1.1 is a pre-release: install it from <https://charlesvestal.github.io/fm1-radio/install/> (Chrome or Edge,
+the FM-1 on USB). It fixes what made 1.0 withdrawn (WiFi dropping while the places loaded, the heap running out
+overnight or after WiFi went off and on, a loud buzz on plain AAC stations) and adds favorites and a small synth. If
+your FM-1 crashed with 1.0, please try 1.1, and if it still does, send the installer page's "Report a problem".
 
 - **Try it in your browser** (no FM-1 needed; it plays the stations, effects and all, through Radio's own decoders;
   Radio Garden's lists come through a small proxy, `app/web/proxy/`, as its site answers no other):
@@ -118,6 +120,8 @@ the first one it finds. To forget one, list them with `python3 base/tools/fm1_re
 | **MASTER** | Volume. |
 | **FX** | Tap tempo for the effects. |
 | **SEL** | Browse the list of continents, countries, places and stations. |
+| **SAVE** | Favorites. |
+| **ARP** | The synth: the keys play notes over the radio. |
 | **GLO** | The WiFi page, and back. |
 | Hold **HOME** | The controls, on the screen. |
 
@@ -136,6 +140,34 @@ In the browser, turn **SELECT** to move, press **SEL** to open a place or to pla
 press **HOME** to go up a level.
 
 The FM-1 remembers the station and whether it was playing, and picks up there at the next start.
+
+### Favorites
+
+Press **SAVE** for your favorites, up to 16. The list's top row adds the station playing. Turn **SELECT** to move,
+press **SEL** to play a favorite, and **REC** to delete it. **HOME** (or **SAVE**) goes back. The favorites are
+kept in the FM-1's flash, apart from everything else; another firmware that uses the same flash (LOOM-8's samples,
+for one) erases them.
+
+### The synth
+
+Press **ARP** to play the keys: a 4-voice synth over whatever the radio plays (or on its own).
+
+| Control | What it does |
+|---|---|
+| **KNOB 1** | The wave: sine, triangle, saw, square, and everything between. |
+| **KNOB 2** | Filter: a low-pass, 80 Hz to 12 kHz. |
+| **KNOB 3** | Attack: 1 ms to 2 s. |
+| **KNOB 4** | Release: 5 ms to 3 s. |
+| **SELECT** | The synth's level against the radio. |
+| **OCT-** / **OCT+** | Octaves, two each way. |
+| **HOME** or **ARP** | Back to the radio (the keys are the effects again). |
+
+Its settings are kept, a few seconds after a change.
+
+### Recording over USB
+
+Plugged into a computer, the FM-1 is also a USB sound card, "RADIO FM-1" (stereo, 44.1 kHz): record the radio, the
+effects and the synth as you hear them (after MASTER) in any audio app.
 
 ### Punch-in effects
 

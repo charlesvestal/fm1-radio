@@ -284,7 +284,7 @@ static void radio_ui_restore(void)
 /* ---- drawing */
 static void ui_text_big(int slot, uint32_t y, const char *t, uint16_t c)   /* the station's name, as large as fits */
 {
-    char key[80];
+    char key[UI_KEY];
     const felucca_font_t *f = text_w(&FONT_M, t) <= 208 ? &FONT_M : &FONT_B;
     snprintf(key, sizeof key, "B%s|%x", t, c);
     if (w_eq(ui_key[slot], key))
@@ -306,7 +306,7 @@ static uint32_t strlen_(const char *s)
 /* a knob's cell: its label small, its value under it (KNOB n in the corner) */
 static void ui_cell(int slot, uint32_t x, uint32_t y, const char *knob, const char *label, const char *val, int hi)
 {
-    char key[80], v[24];
+    char key[UI_KEY], v[24];
     snprintf(key, sizeof key, "C%s|%s|%d", label, val, hi);
     if (w_eq(ui_key[slot], key))
         return;

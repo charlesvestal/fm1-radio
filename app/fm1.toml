@@ -4,7 +4,7 @@ id_prefix = "FM-1_13"          # package identity: dev FM-1_1300, releases FM-1_
 usb_manufacturer = "fm1-radio"
 usb_product = "RADIO FM-1"
 wifi = true                    # WiFi (fm1-base's); no Bluetooth in the same build
-usb_audio_in = false           # (the RAM goes to WiFi and the stream)
+usb_audio_in = true            # the FM-1 as a USB sound card: the computer records Radio over the cable
 usb_audio_out = false
 words = "words.tsv"
 # PacketVideo's AAC decoder (Android 4.1.2, Apache-2.0), built as C: AAC-LC and HE-AAC's SBR (not PS: the RAM)
