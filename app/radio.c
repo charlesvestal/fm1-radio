@@ -593,7 +593,9 @@ static void radio_render(int32_t *o, uint32_t n)
 {
     uint32_t i, r = pcm_r, g = plat_master();     /* Q12 */
     int playing = radio_st == RS_PLAYING;
-    float gain = (float)g * 2048.0f;              /* -1..1 -> 24 bit, the MASTER pot */
+    float gain = (float)g * (float)g * 0.5f;      /* -1..1 -> 24 bit, the MASTER pot squared (an audio taper: the
+                                                   * same at the top, half way -12 dB, not -6; linear, broadcast
+                                                   * audio near 0 dBFS was loud over most of its travel) */
     uint32_t step = radio_step, w = pcm_w;
     for (i = 0; i < n; i++) {
         float l = 0.0f, rr = 0.0f;
