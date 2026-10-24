@@ -23,6 +23,7 @@ static syn_voice_t syv[SYN_VOICES];
 static uint32_t syn_age;
 static float syn_g, syn_a1, syn_a2, syn_a3, syn_ic1, syn_ic2;   /* the filter: coefficients, state */
 static float syn_att, syn_rel, syn_gain;          /* envelope steps a sample; the mix's gain */
+static float syn_morph;                           /* the wave's morph 0..3, slewed toward the knob (no zipper) */
 
 /* the knobs' values, exponential: also what the page shows */
 static float synth_cutoff_hz(void) { return 80.0f * fm_exp2f(7.2288f * (float)syn.cutoff / 127.0f); }   /* ..12 kHz */
@@ -50,6 +51,7 @@ static void synth_init(void)
     for (i = 0; i < SYN_VOICES; i++)
         syv[i].on = syv[i].gate = 0, syv[i].env = 0.0f, syv[i].ph = 0.0f;
     syn_ic1 = syn_ic2 = 0.0f;
+    syn_morph = (float)syn.wave * (3.0f / 127.0f);
     synth_update();
 }
 
@@ -122,8 +124,11 @@ static float syn_shape(int s, float ph, float dt) /* 0 sine, 1 triangle, 2 saw, 
 
 static float synth_next(void)                     /* a sample of the mix, after the filter (the audio interrupt) */
 {
-    float m = (float)syn.wave * (3.0f / 127.0f), t, sum = 0.0f, v1, v2, v3;
-    int s = (int)m, any = 0;
+    float m, t, sum = 0.0f, v1, v2, v3;
+    int s, any = 0;
+    syn_morph += ((float)syn.wave * (3.0f / 127.0f) - syn_morph) * 0.001f;   /* ~23 ms to settle */
+    m = syn_morph;
+    s = (int)m;
     uint32_t i;
     if (s > 2)
         s = 2;

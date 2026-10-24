@@ -417,7 +417,9 @@ static void ui_page_set(int pg);
 static uint32_t syn_keys;                         /* held, as last seen */
 static int8_t syn_key_note[NKEYS];                /* the note each held key started (an octave change between
                                                    * its down and up must not leave it sounding) */
-static uint8_t syn_changed;                       /* settings changed since the page opened: saved on leaving */
+static uint8_t syn_changed;                       /* settings changed, not saved yet: saved 5 s after the last
+                                                   * change, or on leaving */
+static uint32_t syn_changed_t;
 
 static void ui_synth_wave(int slot, uint32_t y)   /* the wave's shape, and the level */
 {
@@ -868,6 +870,12 @@ static void input(void)
         if (ch) {
             synth_update();
             syn_changed = 1;
+            syn_changed_t = plat_ms();
+        }
+        if (syn_changed && plat_ms() - syn_changed_t >= 5000u) {   /* kept through a power-off too */
+            syn_changed = 0;
+            rset.syn = syn;
+            rset_save();
         }
         if (down & ((1u << B_HOME) | (1u << B_ARP)))
             synth_leave();
