@@ -10,7 +10,7 @@ Version {{VERSION}}. Installing is at your own risk; the installer can put M-VAV
 
 - [Install](install/): from Chrome or Edge, with the FM-1 connected by USB.
 - [Try it in the browser](emu/): the stations play, with the effects on the keys, through Radio's own decoders.
-- [How to use it](https://github.com/charlesvestal/fm1-radio#using-it): joining a network, the knobs, the effects.
+- [Manual](manual/): joining a network, the knobs, favorites, the effects, the synth, recording over USB.
 - [Download {{PKG}}](firmware/{{PKG}}): for the command-line installer, `python3 base/tools/fm1_install.py {{PKG}}`.
 - [Source](https://github.com/charlesvestal/fm1-radio): MPL-2.0. Built on fm1-base and felucca-bsp, from Felucca by
   Leo Kuroshita, Hügelton Instruments.
