@@ -517,6 +517,8 @@ int app_sysex(const uint8_t *p, uint32_t n)
             snprintf(lb, sizeof lb, "rg places: %u continents %u countries %u places", rg->n_cont, rg->n_country,
                      rg->n_place);
             wire_line(lb);
+            snprintf(lb, sizeof lb, "rg size: %lu bytes of %lu", (unsigned long)rg->total, (unsigned long)RG_MAX);
+            wire_line(lb);
         } else {
             wire_line("rg none");
         }

@@ -82,8 +82,8 @@ def main():
         r = ask(0x43, nib(a[1].encode()) if len(a) > 1 else [], want=(0x10, 0x11), timeout=5)
         print("\n".join(text(b) for _, b in r) if r else "sent")
     elif c == "rginfo":
-        r = ask(0x53, want=(0x10,), timeout=5)
-        print(text(r[0][1]) if r else "no answer")
+        r = ask(0x53, want=(0x10, 0x11), timeout=3)     # (every line: the counts, the size)
+        print("\n".join(text(b) for _, b in r) if r else "no answer")
     elif c == "places":
         ask(0x54)
         print("sent: the places are fetched again (Home shows the time left)")
