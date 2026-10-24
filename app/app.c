@@ -615,24 +615,20 @@ static void wire_dump(void)
              radio_net_state, (unsigned)(radio_wr - radio_rd), (unsigned)NET_RING, (unsigned)(pcm_w - pcm_r),
              (unsigned)radio_frames, (unsigned)radio_hz, (unsigned)radio_kbps);
     wire_line(b);
-    snprintf(b, sizeof b, "  under %u  rebuf %u  reconn %u  %s%s", (unsigned)radio_underruns,
-             (unsigned)radio_rebuffers, (unsigned)radio_reconnects, dec_kind == 2 ? "AAC " : dec_kind == 1 ? "MP3 " : "",
-             radio_why);
-    wire_line(b);
-    snprintf(b, sizeof b, "  aac bad frames %u", (unsigned)radio_aac_errs);
+    snprintf(b, sizeof b, "  under %u  rebuf %u  reconn %u  aac bad %u  %s%s", (unsigned)radio_underruns,
+             (unsigned)radio_rebuffers, (unsigned)radio_reconnects, (unsigned)radio_aac_errs,
+             dec_kind == 2 ? "AAC " : dec_kind == 1 ? "MP3 " : "", radio_why);
     wire_line(b);
     {   /* rates since the last dump: what came in, what was decoded, how often the main loop went round */
         static uint32_t t_last, wr_last, fr_last, loops_last;
         uint32_t dt = plat_ms() - t_last ? plat_ms() - t_last : 1u, spf;
-        snprintf(b, sizeof b, "  decode %u us a frame, %u at most", radio_dec_n ? (unsigned)(radio_dec_us / radio_dec_n) : 0u,
-                 (unsigned)radio_dec_max);
+        spf = dec_kind != 2 ? 1152u : aac_ext->aacPlusUpsamplingFactor == 2 ? 2048u : 1024u;   /* samples a frame */
+        snprintf(b, sizeof b, "  mode %u  in %u kbit/s  decoded %u fr/s (need %u, %u us, %u max)  loop %u/s", radio_mode,
+                 (unsigned)((radio_wr - wr_last) * 8u / dt), (unsigned)((radio_frames - fr_last) * 1000u / dt),
+                 (unsigned)(radio_hz / spf), radio_dec_n ? (unsigned)(radio_dec_us / radio_dec_n) : 0u,
+                 (unsigned)radio_dec_max, (unsigned)((main_loops - loops_last) * 1000u / dt));
         wire_line(b);
         radio_dec_us = radio_dec_n = radio_dec_max = 0;
-        spf = dec_kind != 2 ? 1152u : aac_ext->aacPlusUpsamplingFactor == 2 ? 2048u : 1024u;   /* samples a frame */
-        snprintf(b, sizeof b, "  mode %u  in %u kbit/s  decoded %u fr/s (need %u)  loop %u/s", radio_mode,
-                 (unsigned)((radio_wr - wr_last) * 8u / dt), (unsigned)((radio_frames - fr_last) * 1000u / dt),
-                 (unsigned)(radio_hz / spf), (unsigned)((main_loops - loops_last) * 1000u / dt));
-        wire_line(b);
         t_last = plat_ms();
         wr_last = radio_wr;
         fr_last = radio_frames;
@@ -670,10 +666,8 @@ int app_sysex(const uint8_t *p, uint32_t n)
     case 0x53:
         if (rg) {
             char lb[64];
-            snprintf(lb, sizeof lb, "rg places: %u continents %u countries %u places", rg->n_cont, rg->n_country,
-                     rg->n_place);
-            wire_line(lb);
-            snprintf(lb, sizeof lb, "rg size: %lu bytes of %lu", (unsigned long)rg->total, (unsigned long)RG_MAX);
+            snprintf(lb, sizeof lb, "rg: %u continents %u countries %u places, %lu of %lu B", rg->n_cont,
+                     rg->n_country, rg->n_place, (unsigned long)rg->total, (unsigned long)RG_MAX);
             wire_line(lb);
         } else {
             wire_line("rg none");

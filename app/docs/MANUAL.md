@@ -81,6 +81,9 @@ scans, and joins the strongest saved network it hears; hearing none, it tries ea
 again shortly. To forget one, from a computer: `python3 base/tools/fm1_remote.py wifi saved` lists them,
 `wifi forget N` forgets the one at N (0 is the first).
 
+The FM-1 always joins with the same address (made from its flash chip's factory ID), so your router sees it as
+one device, through updates and other firmwares.
+
 ---
 
 ## 3. Listening

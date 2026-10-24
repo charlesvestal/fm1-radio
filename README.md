@@ -6,11 +6,13 @@ effects on the keys.
 
 It is a proof of concept: it works, and the rough edges are listed at the end.
 
-Release 1.2 is a pre-release: install it from <https://charlesvestal.github.io/fm1-radio/install/> (Chrome or Edge,
-the FM-1 on USB). 1.1 fixed what made 1.0 withdrawn (WiFi dropping while the places loaded, the heap running out
-overnight or after WiFi went off and on, a loud buzz on plain AAC stations) and added favorites and a small synth;
-1.2 joins WiFi more reliably on a weak signal, joins hidden networks, and keeps WiFi up while an HTTPS station connects. If your FM-1
-crashes or won't stay on your WiFi, please send the installer page's "Report a problem".
+Release 1.3 is a pre-release: install it from <https://charlesvestal.github.io/fm1-radio/install/> (Chrome or Edge,
+the FM-1 on USB); the [manual](https://charlesvestal.github.io/fm1-radio/manual/) is there too. 1.1 fixed what made
+1.0 withdrawn (WiFi dropping while the places loaded, the heap running out overnight or after WiFi went off and on,
+a loud buzz on plain AAC stations) and added favorites and a small synth; 1.2 joins WiFi more reliably on a weak
+signal, joins hidden networks, and keeps WiFi up while an HTTPS station connects; 1.3 joins with the same address
+every time, so a router sees one FM-1, not a new one at each install. If your FM-1 crashes or won't stay on your
+WiFi, please send the installer page's "Report a problem".
 
 - **Try it in your browser** (no FM-1 needed; it plays the stations, effects and all, through Radio's own decoders;
   Radio Garden's lists come through a small proxy, `app/web/proxy/`, as its site answers no other):
