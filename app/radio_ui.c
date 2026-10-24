@@ -31,6 +31,7 @@ static uint8_t tune_want;                         /* what to do once the turning
 static uint32_t tune_at;                          /* when (ms) */
 /* the place's stations: fetched for (list_country, list_place); fetch_want asks, then_tune plays the first */
 static uint8_t list_ok, fetch_want, fetch_busy, fetch_then_tune;
+static int32_t step_pending;                      /* station-knob turns made before the place's list was here */
 static uint16_t list_country;
 static char list_place[32];
 static uint32_t fetch_retry_at;
@@ -85,10 +86,20 @@ static void sel_turn(int level, int32_t d)
         place_load();
         sel_station = -1;
         st_title[0] = 0;
+        step_pending = 0;
         tune_want = TW_PLACE;
     } else if (list_here() && rgn_n) {            /* a station of the list */
         station_pick(step_in(sel_station < 0 ? 0 : (uint32_t)sel_station, rgn_n, sel_station < 0 && d > 0 ? d - 1 : d));
         tune_want = TW_STATION;
+    } else if (st_id[0]) {                        /* a station playing, its list not here (the start's restore,
+                                                   * a favorite): fetched, then a step on from the station playing */
+        step_pending += d;
+        if (!fetch_busy) {
+            fetch_want = 1;
+            fetch_then_tune = 0;
+            fetch_retry_at = plat_ms();
+        }
+        return;
     } else {                                      /* the list is not here yet: fetch it, then play its first */
         tune_want = TW_PLACE;
     }
@@ -148,7 +159,10 @@ static int fav_tune(const fav_t *e)               /* 0 tuned; -1 its place is go
     w_cpy(st_title, e->title, sizeof st_title);
     tune_want = TW_NONE;
     radio_want = 1;
-    station_tune();                               /* the old stream stopped; this one starts once the network is
+    station_tune();
+    fetch_want = 1;                               /* its place's list, once the stream is going (as at the start) */
+    fetch_then_tune = 0;
+    fetch_retry_at = plat_ms() + 5000u;                               /* the old stream stopped; this one starts once the network is
                                                    * free (radio_ui_service), and is remembered as the last */
     return 0;
 }
@@ -170,7 +184,9 @@ static void radio_ui_service(void)
     }
     /* the place's stations, asked of Radio Garden: an https stream gives the TLS state up first */
     if (fetch_want && !fetch_busy && wifi_st == WS_CONNECTED && (int32_t)(plat_ms() - fetch_retry_at) >= 0) {
-        if (radio_net_tls() || (radio_net_running() && radio_url == play_url && play_url[0] && fetch_then_tune)) {
+        if (radio_net_tls() && !fetch_then_tune && !step_pending) {
+            fetch_retry_at = plat_ms() + 30000u;  /* a list for Home's count only: not worth stopping an https stream */
+        } else if (radio_net_tls() || (radio_net_running() && radio_url == play_url && play_url[0] && fetch_then_tune)) {
             if (radio_st != RS_OFF)
                 radio_stop();                     /* a new place anyway, or an https stream in the way */
         } else if (rgn_start(place_name, rg_str(rg_country(sel_country)->name)) == 0) {
@@ -187,6 +203,22 @@ static void radio_ui_service(void)
         if (rgn_state == RGN_DONE) {
             fetch_want = 0;
             list_ok = 1;
+            if (list_here()) {                    /* the station playing, found in it (Home's "3 of 22") */
+                uint32_t i;
+                sel_station = -1;
+                for (i = 0; i < rgn_n; i++)
+                    if (w_eq(rgn_list[i].id, st_id)) {
+                        sel_station = (int32_t)i;
+                        break;
+                    }
+                if (step_pending && rgn_n) {      /* the turns made meanwhile, from there */
+                    station_pick(step_in(sel_station < 0 ? 0 : (uint32_t)sel_station, rgn_n,
+                                         sel_station < 0 && step_pending > 0 ? step_pending - 1 : step_pending));
+                    tune_want = TW_STATION;
+                    tune_at = plat_ms();
+                }
+            }
+            step_pending = 0;
             if (list_here() && fetch_then_tune) {
                 fetch_then_tune = 0;
                 if (rgn_n) {
@@ -240,6 +272,9 @@ static void radio_ui_restore(void)
         w_cpy(st_title, rset.st_title, sizeof st_title);
         snprintf(play_url, sizeof play_url, "https://radio.garden/api/ara/content/listen/%s/channel.mp3", st_id);
         radio_url = play_url;
+        fetch_want = 1;                           /* its place's list, once the stream is going: Home's "3 of 22" */
+        fetch_then_tune = 0;
+        fetch_retry_at = plat_ms() + 5000u;
     } else if (radio_want) {
         tune_want = TW_PLACE;
         tune_at = 0;
