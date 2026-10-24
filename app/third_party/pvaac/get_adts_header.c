@@ -542,6 +542,13 @@ Int get_adts_header(
             pVars->sbrDecoderData.SbrChannel[0].syncState = SBR_ACTIVE;
             pVars->sbrDecoderData.SbrChannel[1].syncState = SBR_ACTIVE;
         }
+        else if (pVars->mc_info.upsamplingFactor == 0)
+        {
+            /* FM-1: a full-rate stream: regular AAC. Left 0 (nothing sets it on ADTS), the frame decoded into the
+             * LTP buffer and was never written out (pvmp4audiodecoderframe.c tests == 1 / == 2): a plain AAC-LC
+             * 44.1 kHz stream played whatever the output buffer held, a loud buzz */
+            pVars->mc_info.upsamplingFactor = 1;
+        }
 #endif
 
 
