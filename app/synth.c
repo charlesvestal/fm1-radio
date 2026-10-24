@@ -3,16 +3,16 @@
 /* A small synth for the keys (ARP's page): 4 voices, each one oscillator whose wave morphs sine -> triangle -> saw
  * -> square (a crossfade between neighbours; saw and square band-limited, polyBLEP) and an attack / release
  * envelope (full sustain while held); one 2-pole low-pass (state-variable, trapezoidal: stable at any cutoff) on
- * their mix. synth_next() runs in the audio interrupt (radio_render), a sample at a time; the rest from the main
- * loop. Settings 0..127. Part of the app's unity build; tests/synth_test.c builds it alone. */
+ * their mix, then a soft limit (tanh). synth_next() runs in the audio interrupt (radio_render), a sample at a time;
+ * the rest from the main loop. Settings 0..127. Part of the app's unity build; tests/synth_test.c builds it alone. */
 #include <stdint.h>
 #include "fastmath.h"
 
 #define SYN_VOICES 4
 #define SYN_SR 44100.0f
 typedef struct { uint8_t wave, cutoff, attack, release, level; int8_t octave; } synth_set_t;
-static const synth_set_t SYN_DEFAULT = {42, 96, 4, 48, 90, 0};
-static synth_set_t syn = {42, 96, 4, 48, 90, 0};
+static const synth_set_t SYN_DEFAULT = {42, 96, 4, 48, 110, 0};
+static synth_set_t syn = {42, 96, 4, 48, 110, 0};
 
 typedef struct {
     float ph, inc, env;                           /* phase and its step, in turns; the envelope 0..1 */
@@ -40,7 +40,8 @@ static void synth_update(void)                    /* the coefficients from syn (
     syn_g = g;
     syn_att = 1000.0f / (synth_attack_ms() * SYN_SR);
     syn_rel = 1000.0f / (synth_release_ms() * SYN_SR);
-    syn_gain = 0.25f * (float)syn.level / 127.0f; /* a voice at full: -12 dBFS */
+    syn_gain = 0.5f * (float)syn.level / 127.0f;  /* a voice at full: -6 dBFS (at -12 it vanished under a station);
+                                                   * chords saturate softly (synth_next) */
 }
 
 static void synth_init(void)
@@ -159,5 +160,5 @@ static float synth_next(void)                     /* a sample of the mix, after 
     v2 = syn_ic2 + syn_a2 * syn_ic1 + syn_a3 * v3;
     syn_ic1 = 2.0f * v1 - syn_ic1;
     syn_ic2 = 2.0f * v2 - syn_ic2;
-    return v2;
+    return fm_tanhf(v2);                          /* a soft limit: 4 voices at full stay under full scale */
 }
