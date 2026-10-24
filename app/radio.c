@@ -101,12 +101,41 @@ static tPVMP4AudioDecoderExternal *aac_ext;
 static void *aac_mem;
 static int16_t *aac_out;                          /* a frame: 1024 stereo */
 static uint32_t radio_aac_errs;
+/* one big block, taken at the start while the heap is whole and kept: AAC's decoder memory (80 KB) or the places'
+ * batch buffer (places.c; never both, the fetch stops the stream). Taken later, after WiFi had restarted and
+ * streams had come and gone, 80 KB in one piece was no longer there though more than that was free: an AAC station
+ * then failed to start ("out of memory"). */
+static uint8_t *arena;
+static uint32_t arena_n;
+static uint8_t arena_user;                        /* 0 free, 1 the AAC decoder, 2 the places */
+static void arena_init(void)
+{
+    arena_n = PVMP4AudioDecoderGetMemRequirements() + 8u;
+    if (arena_n < 72u * 1024u)
+        arena_n = 72u * 1024u;
+    arena = malloc(arena_n);
+}
+static void *arena_take(uint8_t who, uint32_t n)
+{
+    if (!arena || arena_user || n > arena_n)
+        return 0;
+    arena_user = who;
+    return arena;
+}
+static void arena_free(void *p)                   /* free(), or the block given back */
+{
+    if (p && p == (void *)arena)
+        arena_user = 0;
+    else
+        free(p);
+}
+
 static void dec_drop(void)
 {
     free(mp3);
     free(pcm_tmp);
     free(aac_ext);
-    free(aac_mem);
+    arena_free(aac_mem);
     free(aac_out);
     mp3 = 0;
     pcm_tmp = 0;
@@ -140,7 +169,9 @@ static int dec_use(uint8_t kind)                  /* 0 = ready */
         mp3dec_init(mp3);
     } else {
         aac_ext = malloc(sizeof *aac_ext);
-        aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements() + 8u);   /* (SBR's bit reader reads ahead 3 bytes past
+        aac_mem = arena_take(1, PVMP4AudioDecoderGetMemRequirements() + 8u);
+        if (!aac_mem)
+            aac_mem = malloc(PVMP4AudioDecoderGetMemRequirements() + 8u);   /* (SBR's bit reader reads ahead 3 bytes past
                                                                            * its data, at the end of this) */
         aac_out = malloc(4096u * sizeof *aac_out);   /* a frame: 1024 stereo, 2048 with SBR */
         if (!aac_ext || !aac_mem || !aac_out) {
@@ -234,6 +265,8 @@ static void radio_stop(void)
         radio_net_stop();
     radio_st = RS_OFF;
     pcm_r = pcm_w;
+    dec_drop();                                   /* its RAM back (AAC's is 88 KB): kept, a stopped AAC station left
+                                                   * WiFi too little to join again ("heap: out of memory") */
     shim_log("radio: stop");
 }
 

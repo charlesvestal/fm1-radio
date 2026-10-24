@@ -552,6 +552,7 @@ static void wire_actions(void)
 /* ---- the contract */
 void app_init(void)
 {
+    arena_init();                                 /* first, while the heap is whole (radio.c) */
     rg_open();
     fx_reset();
     rset_load();

@@ -371,7 +371,7 @@ static void pl_free(void)
 {
     free(pc);
     free(pc_order);
-    free(bbuf);
+    arena_free(bbuf);
     pc = 0;
     pc_order = 0;
     bbuf = 0;
@@ -456,9 +456,15 @@ static int pl_plan(void)
     }
     {   /* the batches download again: leave room for that connection (its JSON reader, then its TLS record
          * buffer, BR_SSL_BUFSIZE_MONO 16709 bytes), or the largest buffer takes it ("tls: no memory") */
-        void *room = malloc(PL_NET_ROOM);
-        for (bbuf_size = 72u * 1024u; bbuf_size >= biggest && !(bbuf = malloc(bbuf_size)); bbuf_size -= 4096u)
-            ;
+        void *room;
+        if ((bbuf = arena_take(2, 72u * 1024u)) != 0)   /* the big block kept for this (radio.c) */
+            bbuf_size = arena_n;
+        room = bbuf ? 0 : malloc(PL_NET_ROOM);
+        if (!bbuf)
+            bbuf_size = 72u * 1024u;
+        for (; !bbuf && bbuf_size >= biggest; bbuf_size -= 4096u)
+            if ((bbuf = malloc(bbuf_size)) != 0)
+                break;
         free(room);
     }
     if (!bbuf)

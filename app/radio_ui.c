@@ -177,8 +177,9 @@ static void radio_ui_service(void)
             radio_play(0);
         }
     }
-    if (!radio_want && radio_st != RS_OFF)
-        radio_stop();
+    if ((!radio_want || (wifi_st != WS_CONNECTED && radio_mode != 2)) && radio_st != RS_OFF)
+        radio_stop();                             /* (WiFi gone: the stream's RAM back for the rejoin; it starts again
+                                                   * once connected, as radio_want says) */
 }
 
 static void radio_toggle(void)
