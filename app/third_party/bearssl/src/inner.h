@@ -963,6 +963,14 @@ br_fm1_mul64(uint32_t x, uint32_t y)
 
 #define MUL(x, y)   br_fm1_mul64((uint32_t)(x), (uint32_t)(y))
 
+/*
+ * fm1-radio: a turn for the FM-1's other tasks inside the long computations
+ * (the curve arithmetic of a handshake). The scheduler is cooperative: a
+ * handshake ran a second or more at a stretch, WiFi's beacons went unread,
+ * and the access point dropped the FM-1. radio_net.c: os_time_dly(0).
+ */
+void br_fm1_yield(void);
+
 #if BR_CT_MUL31
 
 /*

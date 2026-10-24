@@ -703,6 +703,8 @@ p256_to_affine(p256_jacobian *P)
 	 */
 	memcpy(t2, P->z, sizeof P->z);
 	for (i = 1; i < 256; i ++) {
+		if ((i & 31) == 0)
+			br_fm1_yield();   /* fm1-radio (inner.h) */
 		square_f256(t2, t2);
 		switch (i) {
 		case 31:
@@ -1141,6 +1143,7 @@ p256_mul(p256_jacobian *P, const unsigned char *x, size_t xlen)
 	while (xlen -- > 0) {
 		int k;
 
+		br_fm1_yield();   /* fm1-radio (inner.h): a byte of the multiplier */
 		for (k = 6; k >= 0; k -= 2) {
 			uint32_t bits;
 			uint32_t bnz;
@@ -1312,6 +1315,7 @@ p256_mulgen(p256_jacobian *P, const unsigned char *x, size_t xlen)
 		unsigned bx;
 
 		bx = *x ++;
+		br_fm1_yield();   /* fm1-radio (inner.h): a byte of the multiplier */
 		for (k = 0; k < 2; k ++) {
 			uint32_t bits;
 			uint32_t bnz;

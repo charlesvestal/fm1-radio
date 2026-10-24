@@ -24,6 +24,8 @@ extern int snprintf(char *buf, unsigned long sz, const char *f, ...);
 extern void *malloc(unsigned long n);
 extern void free(void *p);
 extern void radio_entropy(uint8_t *p, unsigned n);   /* the app's: timing and converter noise */
+extern void os_time_dly(int ticks);
+void br_fm1_yield(void) { os_time_dly(0); }        /* BearSSL's long computations let WiFi's tasks run (inner.h) */
 
 enum { RN_IDLE, RN_CONNECTING, RN_STREAMING, RN_ERROR, RN_ENDED, RN_UNPLAYABLE };
 volatile int radio_net_state;
@@ -237,6 +239,7 @@ static int http_open(conn_t *c, char *u, unsigned umax, int json)
     char host[64], req[640], line[URL_MAX];
     const char *path;
     int port, s, n = 0, status = 0, secure, rc;
+    uint32_t t_hs;                                /* when the request (and so the handshake) began */
     struct hostent *he;
     struct sockaddr_in a;
     char type[40];
@@ -287,6 +290,7 @@ static int http_open(conn_t *c, char *u, unsigned umax, int json)
     n = snprintf(req, sizeof req, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: FM-1 Net/0.1\r\n%s"
                  "Connection: close\r\n\r\n", path, host,
                  json ? "Accept: application/json\r\n" : "Icy-MetaData: 0\r\nAccept: */*\r\n");
+    t_hs = shim_ms();
     if (conn_write(c, req, (unsigned)n)) {        /* for https, the handshake happens here */
         conn_close(c);
         if (!c->why[0] || !secure)
@@ -294,8 +298,11 @@ static int http_open(conn_t *c, char *u, unsigned umax, int json)
         shim_log(c->why);
         return -1;
     }
-    if (secure)
-        shim_log("tls up");
+    if (secure) {
+        char b[32];
+        snprintf(b, sizeof b, "tls up after %lu ms", (unsigned long)(shim_ms() - t_hs));
+        shim_log(b);
+    }
     /* the headers, a line at a time */
     if (!json)
         radio_net_name[0] = 0;
@@ -504,6 +511,33 @@ typedef struct {
     uint8_t country;                              /* "country" read as the subtitle (the places' list) */
 } js_t;
 
+static void js_put(char *d, unsigned max, const char *s, unsigned n);
+/* a "url" kept: whole if it fits, else its kind and its id ("/listen/praise-austin-urban-gospel-channel/7zPeJ1HG"
+ * -> "/listen/7zPeJ1HG"): the name between them is not needed, and cut short it took the id with it (a station
+ * with a long name did not play) */
+static void js_url(char *d, unsigned max, const char *v, unsigned n)
+{
+    const char *id = v;
+    unsigned p = 0, i, k = 0;
+    if (n < max) {
+        js_put(d, max, v, n);
+        return;
+    }
+    for (i = 0; v[i]; i++)                        /* the last segment */
+        if (v[i] == '/' && v[i + 1])
+            id = v + i + 1;
+    if (v[0] == '/')                              /* the first, with its slashes */
+        for (p = 1; v[p] && v[p] != '/'; p++)
+            ;
+    if (v[p] == '/')
+        p++;
+    for (i = 0; i < p && k + 1u < max; i++)
+        d[k++] = v[i];
+    for (i = 0; id[i] && k + 1u < max; i++)
+        d[k++] = id[i];
+    d[k] = 0;
+}
+
 static void js_char(js_t *j, uint32_t cp)        /* a character of the string being read */
 {
     char ch = fold_cp(cp);
@@ -552,7 +586,7 @@ static int js_feed(js_t *j, const uint8_t *p, unsigned n)   /* nonzero: the call
                     uint8_t d = (uint8_t)(j->depth - 1u);
                     j->val[j->vlen] = 0;
                     if (!strcmp(j->key, "url"))
-                        js_put(j->url[d], sizeof j->url[d], j->val, j->vlen);
+                        js_url(j->url[d], sizeof j->url[d], j->val, j->vlen);
                     else if (!strcmp(j->key, "title"))
                         js_put(j->title[d], sizeof j->title[d], j->val, j->vlen);
                     else if (!strcmp(j->key, j->country ? "country" : "subtitle"))
