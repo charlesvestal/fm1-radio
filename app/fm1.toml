@@ -26,3 +26,12 @@ tagline = "an internet radio for the FM-1"
 repo = "https://github.com/charlesvestal/fm1-radio"
 licence = "MPL-2.0"
 credits = "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments); the stations are Radio Garden's."
+
+# firmware.json, for firmware hubs (fm1-base docs/FIRMWARE-JSON.md)
+title = "Radio"                # the name people see (firmware.json; the USB name is fm1-radio)
+author = "Charles Vestal"
+description = "Radio turns the M-VAVE FM-1 into a pocket internet radio. It joins a 2.4 GHz WiFi network, plays stations from around the world from Radio Garden's map, and lets you play the radio with punch-in effects on the keys. It keeps favorites and has a small synth too."
+tags = ["utility", "experimental"]
+install = "https://charlesvestal.github.io/fm1-radio/install/"
+site = "https://charlesvestal.github.io/fm1-radio/"
+screenshot = "docs/img/home.png"
