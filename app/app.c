@@ -595,7 +595,7 @@ static void ui_scan(void)
 static void wire_dump(void)
 {
     char b[96];
-    snprintf(b, sizeof b, "up %u ms  wifi %s  loops %u", (unsigned)plat_ms(), wifi_status_str(), (unsigned)main_loops);
+    snprintf(b, sizeof b, "up %u ms wifi %s loops %u", (unsigned)plat_ms(), wifi_status_str(), (unsigned)main_loops);
     wire_line(b);
     radio_ui_dump();
 #ifndef PLAT_HOST
@@ -611,11 +611,11 @@ static void wire_dump(void)
         wire_line(b);
     }
 #endif
-    snprintf(b, sizeof b, "radio %s  net %d  buf %u/%u  pcm %u  fr %u  %uHz %ukbps", radio_status_str(),
+    snprintf(b, sizeof b, "radio %s net %d buf %u/%u pcm %u fr %u %uHz %ukbps", radio_status_str(),
              radio_net_state, (unsigned)(radio_wr - radio_rd), (unsigned)NET_RING, (unsigned)(pcm_w - pcm_r),
              (unsigned)radio_frames, (unsigned)radio_hz, (unsigned)radio_kbps);
     wire_line(b);
-    snprintf(b, sizeof b, "  under %u  rebuf %u  reconn %u  aac bad %u  %s%s", (unsigned)radio_underruns,
+    snprintf(b, sizeof b, "  under %u rebuf %u reconn %u aac bad %u %s%s", (unsigned)radio_underruns,
              (unsigned)radio_rebuffers, (unsigned)radio_reconnects, (unsigned)radio_aac_errs,
              dec_kind == 2 ? "AAC " : dec_kind == 1 ? "MP3 " : "", radio_why);
     wire_line(b);
