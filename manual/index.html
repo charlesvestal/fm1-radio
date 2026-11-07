@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADIO: Radio</title>
+<meta name="description" content="Radio for RADIO, a firmware for the M-VAVE FM-1.">
+<style>
+/* paper and ink: warm white paper, ink-blue type, vermilion for what is played, mustard for asides; a shade of the
+   paper for code and callouts (CTL-1's; a firmware may restyle its site) */
+:root {
+  --paper: #fbf8f1; --sheet: #efe9dc; --rule: #ddd4c2; --ink: #1e2b5a; --muted: #5d6585;
+  --hot: #e5482e; --hot-t: #f8d3c9; --cool: #d9a21b; --cool-t: #f5e4b8;
+  --hot-ink: #c23a22;                                 /* the vermilion as text: 4.5:1 on the paper */
+  color-scheme: light;
+}
+body {
+  background: var(--paper); color: var(--ink); margin: 0;
+  font: 400 17px/1.6 "Helvetica Neue", Helvetica, Arial, sans-serif;
+  padding-inline: 16px; padding-block: 32px 64px;
+}
+main { max-width: 46rem; margin: 0 auto; }
+.page > .site { max-width: 46rem; margin-inline: auto; }
+main:focus { outline: none; }
+h1, h2, h3 { font-family: inherit; text-wrap: balance; line-height: 1.2; }
+h1 { font-size: 2.2rem; font-weight: 700; margin: 0 0 .4rem; letter-spacing: .02em; }
+h2 { font-size: 1.3rem; font-weight: 700; margin: 3rem 0 .8rem; padding-top: .8rem; border-top: 2px solid var(--ink); }
+h2 .num { color: var(--hot); margin-right: .5em; font-variant-numeric: tabular-nums; }
+h3 { font-size: 1.1rem; font-weight: 700; margin: 2rem 0 .5rem; }
+p, li { max-width: 65ch; }
+p { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.3rem; margin: 0 0 1rem; }
+li { margin: .2rem 0; }
+li::marker { color: var(--hot); }
+strong { font-weight: 700; }
+a { color: var(--ink); text-decoration-color: var(--hot); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+a:hover { background: var(--hot-t); }
+:focus-visible { outline: 3px solid var(--hot-ink); outline-offset: 2px; }
+.skip { position: absolute; left: 16px; top: -100px; background: var(--ink); color: var(--paper); padding: 8px 14px; border-radius: 0 0 6px 6px; z-index: 1; }
+.skip:focus { top: 0; }
+code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .86em; }
+code { background: var(--sheet); padding: .08em .35em; border-radius: 3px; }
+pre { background: var(--sheet); border-radius: 6px; padding: 14px 16px; overflow-x: auto; line-height: 1.45; margin: 0 0 1.2rem; }
+pre code { background: none; padding: 0; font-size: inherit; }
+hr { display: none; }
+.table { overflow-x: auto; margin: 0 0 1.3rem; }
+table { border-collapse: collapse; width: 100%; font-size: .95rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; vertical-align: top; padding: .45rem .7rem .45rem 0; border-bottom: 1px solid var(--rule); }
+th { font-weight: 700; text-transform: uppercase; letter-spacing: .06em; font-size: .78rem; color: var(--muted); border-bottom: 2px solid var(--ink); }
+td:first-child { white-space: nowrap; }
+.lede { margin-bottom: 1.6rem; }
+.status { background: var(--sheet); border-radius: 6px; padding: 12px 16px; }
+.status p { margin: 0; }
+.site { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem 1.2rem; margin: 0 0 1.6rem; padding-bottom: .5rem; border-bottom: 2px solid var(--ink); }
+.site .home { font-size: 1.1rem; font-weight: 700; letter-spacing: .04em; color: var(--ink); text-decoration: none; }
+.site .home:hover { color: var(--hot-ink); background: none; }
+.site nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: .2rem 1rem; font-size: .92rem; }
+.site nav a { color: var(--ink); text-underline-offset: 3px; }
+.site nav a[aria-current] { text-decoration: none; color: var(--hot-ink); }
+a.home { color: inherit; text-decoration: none; }
+a.home:hover { background: none; color: var(--hot-ink); }
+main > a.home { display: inline-block; font-size: .9rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 .4rem; }
+.callout { border-left: 4px solid var(--cool); background: var(--cool-t); padding: 10px 16px; margin: 0 0 1.2rem; max-width: 65ch; border-radius: 0 6px 6px 0; }
+.callout p { margin: 0; }
+details { background: var(--sheet); border-radius: 6px; padding: 0 16px; margin: 0 0 1.2rem; }
+details > summary { cursor: pointer; padding: 10px 0; }
+details[open] > summary { margin-bottom: .4rem; }
+details > :last-child { margin-bottom: 1rem; }
+.swatch { display: inline-block; width: .7em; height: .7em; margin-right: .4em; vertical-align: .02em; }
+nav.contents ol { columns: 2 14rem; column-gap: 2rem; padding-left: 1.3rem; }
+.figs { display: flex; flex-wrap: wrap; gap: 20px; margin: .4rem 0 1.6rem; }
+figure { margin: 0; flex: 0 1 auto; }
+figure img { display: block; max-width: 100%; height: auto; }
+figure.shot img { width: 300px; image-rendering: pixelated; border-radius: 4px; box-shadow: 0 0 0 1px var(--rule); }
+figure.wide { flex-basis: 100%; }
+figure.wide img { width: 100%; }
+figcaption { color: var(--muted); font-size: .88rem; margin-top: .4rem; max-width: 300px; }
+figure.wide figcaption { max-width: none; }
+nav.contents li { break-inside: avoid; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<div class="page">
+<main id="content" tabindex="-1">
+<a class="home" href="../">RADIO</a>
+<h1>Radio</h1>
+<p>Radio turns the M-VAVE FM-1 into a pocket internet radio. It joins a 2.4 GHz WiFi network and plays stations from around the world from Radio Garden's map, MP3 and AAC (HE-AAC included). The white keys are punch-in effects, ARP turns the keys into a small synth over the radio, SAVE keeps your favorite stations, and over USB the FM-1 is a sound card you can record from.</p>
+<div class="figs"><figure class="shot"><img src="img/home.png" alt="Home: a station in Amsterdam, with the four knobs" loading="lazy"><figcaption>Radio on the FM-1's screen</figcaption></figure></div>
+<hr>
+<nav class="contents" aria-label="Contents"><h2 id="contents">Contents</h2>
+<ol><li><a href="#s1">Install</a></li><li><a href="#s2">Join a network</a></li><li><a href="#s3">Listening</a></li><li><a href="#s4">Favorites</a></li><li><a href="#s5">Punch-in effects</a></li><li><a href="#s6">The synth</a></li><li><a href="#s7">Recording over USB</a></li><li><a href="#s8">Troubleshooting</a></li><li><a href="#s9">Known limits</a></li></ol>
+</nav>
+<hr>
+<h2 id="s1"><span class="num">1</span>Install</h2>
+<p><strong>Try it first:</strong> the <a href="https://charlesvestal.github.io/fm1-radio/emu/">Radio emulator</a> runs the same code in the browser: the stations play, with the effects on the keys, through Radio's own decoders.</p>
+<p><strong>Install:</strong> open the <a href="https://charlesvestal.github.io/fm1-radio/install/">web installer</a> in Chrome or Edge, connect the FM-1 with a USB data cable and press Install. Don't unplug it while it's writing; when it finishes, the FM-1 restarts into Radio.</p>
+<p><strong>Go back:</strong> "Back to the stock firmware", at the bottom of the same page, puts M-VAVE's firmware back.</p>
+<div class="callout"><p>Installing other firmware is at your own risk. If the FM-1 ever won't start, hold <strong>REC</strong> while you switch it on: it starts in update mode, and the installer page can write a firmware again.</p></div>
+<details><summary>Install from the command line</summary>
+<p>Download the firmware file (<code>radio-VERSION.fwsc</code>) from the <a href="https://github.com/charlesvestal/fm1-radio/releases">releases page</a>, get the Radio source from GitHub, install Python 3 with <code>pip3 install mido python-rtmidi</code>, and run:</p>
+<pre tabindex="0" role="region" aria-label="Command: Install"><code>python3 base/tools/fm1_install.py radio-VERSION.fwsc</code></pre>
+</details>
+<hr>
+<h2 id="s2"><span class="num">2</span>Join a network</h2>
+<p>The FM-1 joins 2.4 GHz networks only, open or WPA2 with a password. It can't see 5 GHz networks: if your router has one name for both bands, it will still find the 2.4 GHz one.</p>
+<p>With no network saved, the FM-1 starts on the list of networks around it, already scanning: turn <strong>SELECT</strong> to yours and press <strong>PLAY</strong>, then type its password (steps 4 and 5 below).</p>
+<div class="figs"><figure class="shot"><img src="img/nets.png" alt="The networks around: signal, channel, and whether it needs a password; * marks a saved one" loading="lazy"><figcaption>The networks around: signal, channel, and whether it needs a password; * marks a saved one</figcaption></figure></div>
+<ol><li>Press <strong>GLO</strong> for the WiFi page.</li><li>Press <strong>PLAY</strong> to turn WiFi on, then <strong>SEL</strong> to see the networks around you. <strong>SEL</strong> again scans again.</li><li>Turn <strong>SELECT</strong> to a network. Each shows its signal (-50 is strong, -80 is weak), its channel, and "lock" if it needs a password.</li><li>For an open network or one you've saved, press <strong>PLAY</strong> to join. Otherwise press <strong>SAVE</strong> to type its password.</li><li>Type the password on the keys and press <strong>PLAY</strong> to save it and join. <strong>HOME</strong> cancels.</li></ol>
+<p><strong>A hidden network:</strong> choose <strong>Other...</strong> (at the top while it scans, at the bottom after), type the network's name and press <strong>PLAY</strong>, then its password (none for an open network) and <strong>PLAY</strong> again.</p>
+<p><strong>Typing:</strong> the keys type left to right, every key in turn, black ones too: the first 26 are a to z, and the last key deletes. Hold <strong>OCT−</strong> and press a key for a capital; hold <strong>OCT+</strong> for the digits 0 to 9 and then <code>space ! @ # $ % &amp; * - _ . , ? + / :</code>. The screen shows a small keyboard with what each key types.</p>
+<p><strong>Saved networks:</strong> the FM-1 keeps six, the most recent first. With networks saved, it turns WiFi on at start, scans, and joins the strongest saved network it hears; hearing none, it tries each saved one in turn, and tries again shortly. To forget one, from a computer: <code>python3 base/tools/fm1_remote.py wifi saved</code> lists them, <code>wifi forget N</code> forgets the one at N (0 is the first).</p>
+<p>The FM-1 always joins with the same address (made from its flash chip's factory ID), so your router sees it as one device, through updates and other firmwares.</p>
+<hr>
+<h2 id="s3"><span class="num">3</span>Listening</h2>
+<div class="table" tabindex="0" role="region" aria-label="Table: Listening (Control, What it does)"><table><thead><tr><th>Control</th><th>What it does</th></tr></thead><tbody><tr><td><strong>PLAY</strong></td><td>Play or stop.</td></tr><tr><td><strong>KNOB 1</strong></td><td>Continent.</td></tr><tr><td><strong>KNOB 2</strong></td><td>Country.</td></tr><tr><td><strong>KNOB 3</strong></td><td>Place: a city or town, A to Z.</td></tr><tr><td><strong>KNOB 4</strong> or <strong>SELECT</strong></td><td>Station in the place.</td></tr><tr><td><strong>MASTER</strong></td><td>Volume.</td></tr><tr><td><strong>FX</strong></td><td>Tap tempo for the effects.</td></tr><tr><td><strong>SEL</strong></td><td>Browse the list of continents, countries, places and stations.</td></tr><tr><td><strong>SAVE</strong></td><td>Favorites.</td></tr><tr><td><strong>ARP</strong></td><td>The synth.</td></tr><tr><td><strong>GLO</strong></td><td>The WiFi page, and back.</td></tr><tr><td>Hold <strong>HOME</strong></td><td>The controls, on the screen.</td></tr></tbody></table></div>
+<p>The knobs work as a dial: turn them, and the radio tunes once you stop. A new place takes a second or two: the FM-1 asks Radio Garden for its stations (up to 100, as Radio Garden orders them) and plays the first. The screen shows the station, its place and country, and whether it is playing or buffering. A station that drops out is reconnected by itself.</p>
+<div class="figs"><figure class="shot"><img src="img/browse.png" alt="The browser: a city&#x27;s stations" loading="lazy"><figcaption>The browser: a city's stations</figcaption></figure></div>
+<p>In the browser, turn <strong>SELECT</strong> to move, press <strong>SEL</strong> to open a place or to play a station, and press <strong>HOME</strong> to go up a level.</p>
+<p>The FM-1 plays MP3 and AAC streams, HE-AAC ("AAC+") included; an HE-AAC v2 stream plays in mono. A few stations can't play at all (HLS, AAC in an MP4 container, Ogg), and some are offline. The screen says so ("can't play HLS", "station offline"): turn <strong>KNOB 4</strong> to the next one.</p>
+<p>The FM-1 remembers the station and whether it was playing, and picks up there at the next start.</p>
+<div class="figs"><figure class="shot"><img src="img/help.png" alt="The controls, shown while HOME is held" loading="lazy"><figcaption>The controls, shown while HOME is held</figcaption></figure></div>
+<hr>
+<h2 id="s4"><span class="num">4</span>Favorites</h2>
+<p>Press <strong>SAVE</strong> for your favorites, up to 16. The list's top row adds the station playing. Turn <strong>SELECT</strong> to move, press <strong>SEL</strong> to play a favorite, and <strong>REC</strong> to delete it. <strong>HOME</strong> (or <strong>SAVE</strong>) goes back.</p>
+<p>The favorites are kept in the FM-1's flash, apart from everything else. Another firmware that uses the same flash (LOOM-8's samples, for one) erases them.</p>
+<hr>
+<h2 id="s5"><span class="num">5</span>Punch-in effects</h2>
+<p>While the radio plays, the 16 white keys light up. Hold a white key for its effect, and let go to stop it. Hold several to mix them. The screen shows what is held, and a held key's light goes out.</p>
+<div class="table" tabindex="0" role="region" aria-label="Table: Punch-in effects (White key, Effect)"><table><thead><tr><th>White key</th><th>Effect</th></tr></thead><tbody><tr><td>1</td><td>Low-pass filter</td></tr><tr><td>2</td><td>High-pass filter</td></tr><tr><td>3</td><td>Telephone: a narrow, driven band</td></tr><tr><td>4</td><td>Bitcrush</td></tr><tr><td>5</td><td>Stutter, 1/8: repeats the last eighth note</td></tr><tr><td>6</td><td>Stutter, 1/16</td></tr><tr><td>7</td><td>Stutter, 1/32</td></tr><tr><td>8</td><td>Stutter, 1/64</td></tr><tr><td>9</td><td>Tape stop</td></tr><tr><td>10</td><td>Reverse</td></tr><tr><td>11</td><td>Chop, 1/8: open for the first half of each eighth note, from your press</td></tr><tr><td>12</td><td>Chop, 1/16</td></tr><tr><td>13</td><td>Ring modulator</td></tr><tr><td>14</td><td>Half speed</td></tr><tr><td>15</td><td>Mute</td></tr><tr><td>16</td><td>Lo-fi</td></tr></tbody></table></div>
+<div class="figs"><figure class="shot"><img src="img/fx.png" alt="Home with a stutter held" loading="lazy"><figcaption>Home with a stutter held</figcaption></figure></div>
+<p>The stutters, tape stop, reverse and half speed play back the last quarter second, in mono. Only one of them plays at a time: with two held, the lower key wins. The filters, crushers, ring modulator, chops and mute work on top of them.</p>
+<p><strong>Tap tempo.</strong> The stutters and chops follow a tempo, 120 BPM at start. Tap <strong>FX</strong> on Home in time with the music to set it: the last four taps count, and a pause of two seconds starts a new count. The screen shows the tempo for two seconds, and the FX light flashes on the beat. Below about 108 BPM the 1/8 stutter plays a 1/16 instead (the history holds about a quarter second).</p>
+<hr>
+<h2 id="s6"><span class="num">6</span>The synth</h2>
+<p>Press <strong>ARP</strong> to play the keys: a 4-voice synth over whatever the radio plays, or on its own.</p>
+<div class="figs"><figure class="shot"><img src="img/synth.png" alt="The synth: the wave, filter, attack and release, and the keys held" loading="lazy"><figcaption>The synth: the wave, filter, attack and release, and the keys held</figcaption></figure></div>
+<div class="table" tabindex="0" role="region" aria-label="Table: The synth (Control, What it does)"><table><thead><tr><th>Control</th><th>What it does</th></tr></thead><tbody><tr><td><strong>KNOB 1</strong></td><td>The wave: sine, triangle, saw, square, and everything between.</td></tr><tr><td><strong>KNOB 2</strong></td><td>Filter: a low-pass, 80 Hz to 12 kHz.</td></tr><tr><td><strong>KNOB 3</strong></td><td>Attack: 1 ms to 2 s.</td></tr><tr><td><strong>KNOB 4</strong></td><td>Release: 5 ms to 3 s.</td></tr><tr><td><strong>SELECT</strong></td><td>The synth's level against the radio.</td></tr><tr><td><strong>OCT-</strong> / <strong>OCT+</strong></td><td>Octaves, two each way.</td></tr><tr><td><strong>HOME</strong> or <strong>ARP</strong></td><td>Back to the radio (the keys are the effects again).</td></tr></tbody></table></div>
+<p>Its settings are kept, a few seconds after a change.</p>
+<hr>
+<h2 id="s7"><span class="num">7</span>Recording over USB</h2>
+<p>Plugged into a computer, the FM-1 is also a USB sound card, "RADIO FM-1" (stereo, 44.1 kHz). Choose it as the input in any audio app to record the radio, the effects and the synth as you hear them (after MASTER).</p>
+<hr>
+<h2 id="s8"><span class="num">8</span>Troubleshooting</h2>
+<p><strong>It can't find my network, or keeps dropping it.</strong> The FM-1's antenna is small: where a phone shows full bars, the FM-1 may see -75 or less, and below about -80 it struggles. Move it nearer the router, or check that the router's 2.4 GHz band is on. A phone's hotspot works well as a test.</p>
+<p><strong>A station won't play.</strong> Some stations are offline or use a format the FM-1 can't play (see Listening): turn <strong>KNOB 4</strong> to the next.</p>
+<p><strong>"Report a problem".</strong> If the FM-1 crashes, or won't stay on your WiFi, connect it by USB and open the <a href="https://charlesvestal.github.io/fm1-radio/install/">installer page</a>: "Report a problem" reads its crash record and log, ready to copy into an issue on <a href="https://github.com/charlesvestal/fm1-radio/issues">GitHub</a>. Don't switch the FM-1 off first: the record survives a restart, not switching off.</p>
+<hr>
+<h2 id="s9"><span class="num">9</span>Known limits</h2>
+<ul><li>2.4 GHz WiFi only, open or WPA2 with a password.</li><li>MP3 and AAC streams; HE-AAC v2 plays in mono, and HLS, MP4 and Ogg streams don't play.</li><li>A place shows up to 100 stations.</li><li>Server certificates aren't checked: the connection to a station or to Radio Garden is encrypted, but not verified.</li></ul>
+<p>Radio is open source (MPL-2.0), built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments). The stations and the map are Radio Garden's. Radio Garden isn't affiliated with Radio. M-VAVE and FM-1 are trademarks of their owners; Radio is not affiliated with M-VAVE.</p>
+</main>
+</div>
+</body>
+</html>
