@@ -623,7 +623,7 @@ static void wire_dump(void)
         static uint32_t t_last, wr_last, fr_last, loops_last;
         uint32_t dt = plat_ms() - t_last ? plat_ms() - t_last : 1u, spf;
         spf = dec_kind != 2 ? 1152u : aac_ext->aacPlusUpsamplingFactor == 2 ? 2048u : 1024u;   /* samples a frame */
-        snprintf(b, sizeof b, "  mode %u  in %u kbit/s  decoded %u fr/s (need %u, %u us, %u max)  loop %u/s", radio_mode,
+        snprintf(b, sizeof b, "  mode %u in %u kb/s dec %u fr/s (need %u, %u us, %u max) loop %u/s", radio_mode,
                  (unsigned)((radio_wr - wr_last) * 8u / dt), (unsigned)((radio_frames - fr_last) * 1000u / dt),
                  (unsigned)(radio_hz / spf), radio_dec_n ? (unsigned)(radio_dec_us / radio_dec_n) : 0u,
                  (unsigned)radio_dec_max, (unsigned)((main_loops - loops_last) * 1000u / dt));
